@@ -9,13 +9,15 @@ from textual.containers import Container
 
 from .base import BaseScreen
 from ...agent import JobHuntAgent
+from ...db import JobHuntDB
 
 
 class ChatScreen(BaseScreen):
     """Chat screen for interacting with the agent"""
 
-    def __init__(self):
+    def __init__(self, db: JobHuntDB | None = None):
         super().__init__(name="chat")
+        self.db = db
         self.agent: JobHuntAgent | None = None
         self.messages: List[Dict[str, str]] = [
             {"role": "system", "content": "You are a helpful job-hunting assistant."}
@@ -60,7 +62,7 @@ class ChatScreen(BaseScreen):
     async def _ask_agent(self) -> None:
         try:
             if self.agent is None:
-                self.agent = JobHuntAgent()
+                self.agent = JobHuntAgent(self.db)
             reply = await asyncio.to_thread(self.agent.chat, list(self.messages))
         except Exception as e:
             reply = f"[red]Error:[/] {e}"

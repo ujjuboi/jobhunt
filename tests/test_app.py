@@ -88,7 +88,7 @@ def test_chat_round_trip(monkeypatch):
 
     async def run():
         fake = FakeAgent()
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda: fake)
+        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
@@ -115,7 +115,7 @@ def test_chat_surfaces_agent_error(monkeypatch):
 
     async def run():
         fake = FakeAgent(error=RuntimeError("oMLX down"))
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda: fake)
+        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
