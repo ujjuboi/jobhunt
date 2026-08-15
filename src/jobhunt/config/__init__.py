@@ -68,3 +68,19 @@ def load_omlx_settings() -> OEMLXSettings:
 def get_omlx_settings() -> OEMLXSettings:
     """Cached accessor for oMLX settings (loaded lazily on first use)."""
     return load_omlx_settings()
+
+
+VALID_SCORING_MODES = ("hybrid", "embedding", "llm")
+
+
+def get_scoring_mode() -> str:
+    """
+    Return the fit-scoring mode: hybrid | embedding | llm.
+    Overridable via JOBHUNT_SCORING_MODE; defaults to hybrid.
+    """
+    mode = os.environ.get("JOBHUNT_SCORING_MODE", "hybrid").lower()
+    if mode not in VALID_SCORING_MODES:
+        raise ValueError(
+            f"Invalid scoring mode '{mode}'. Expected one of: {', '.join(VALID_SCORING_MODES)}"
+        )
+    return mode

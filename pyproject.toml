@@ -24,6 +24,7 @@ dependencies = [
     "python-docx",
     "pydantic",
     "rich",
+    "numpy",
 ]
 
 [dependency-groups]

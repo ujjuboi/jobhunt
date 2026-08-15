@@ -9,6 +9,7 @@ from ..models import Job, FitScore, Profile, Application
 from ..sources import get_source_adapter
 from ..db import JobHuntDB
 from ..embeddings import EmbeddingClient
+from ..scoring import ScorePipeline
 import json
 import hashlib
 
@@ -16,9 +17,10 @@ import hashlib
 class ToolRegistry:
     """Registry for all available agent tools"""
     
-    def __init__(self, db: JobHuntDB = None):
+    def __init__(self, db: JobHuntDB = None, agent=None):
         self.tools = {}
         self.db = db
+        self.agent = agent
         self.register_tool("search_jobs", self.search_jobs)
         self.register_tool("get_job_detail", self.get_job_detail)
         self.register_tool("score_fit", self.score_fit)
@@ -100,17 +102,29 @@ class ToolRegistry:
             return None
         
     def score_fit(self, job_id: str, profile: Profile) -> FitScore:
-        """Score job fit against profile using embedding-based approach"""
-        # This implementation should be enhanced with embedding logic as per Phase 3
-        # For now, return a placeholder that can be replaced with the actual hybrid scoring
-        return FitScore(
-            job_id=job_id,
-            score=0.5,  # Placeholder score
-            explanation="Fit scoring with embeddings - placeholder implementation",
-            matched_skills=["Python", "SQL"],
-            missing_skills=["React", "Docker"],
-            suggested_bullets=["Led development of scalable backend services using Python and PostgreSQL"]
-        )
+        """Score job fit against profile using the hybrid embedding + LLM pipeline."""
+        def _failed(message: str) -> FitScore:
+            return FitScore(
+                job_id=job_id,
+                score=0.0,
+                explanation=message,
+                matched_skills=[],
+                missing_skills=[],
+                suggested_bullets=[],
+            )
+
+        if not self.db:
+            return _failed("No database available")
+        job = self.db.get_job(job_id)
+        if not job:
+            return _failed(f"Job {job_id} not found")
+        try:
+            pipeline = ScorePipeline(self.db, EmbeddingClient(), agent=self.agent)
+            results = pipeline.score([job], profile, mode="hybrid", top_n=1)
+            return results[0] if results else _failed("No score could be computed")
+        except Exception as e:
+            print(f"Error scoring fit: {e}")
+            return _failed(f"Fit scoring failed: {e}")
         
     def tailor_resume(self, job_id: str, profile: Profile) -> str:
         """Tailor resume for a specific job"""
@@ -169,7 +183,7 @@ class JobHuntAgent:
             base_url=settings.base_url,
             api_key=settings.api_key
         )
-        self.tool_registry = ToolRegistry(db)
+        self.tool_registry = ToolRegistry(db, agent=self)
         
     def run_tool(self, tool_name: str, **kwargs) -> Any:
         """Execute a tool with given arguments"""

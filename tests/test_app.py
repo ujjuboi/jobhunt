@@ -36,6 +36,25 @@ def test_nav_switches_screen():
     asyncio.run(run())
 
 
+def test_fit_screen_analyze_without_profile_guides_user():
+    """Fit screen with an empty DB must explain that a profile is needed."""
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#fit_btn")
+            await asyncio.sleep(0.1)
+            from jobhunt.app.screens.fit import FitScreen
+            assert isinstance(app.screen, FitScreen)
+            await pilot.click("#analyze_button")
+            await asyncio.sleep(0.1)
+            status = app.screen.query_one("#fit_status").content
+            assert "profile" in str(status).lower()
+
+    asyncio.run(run())
+
+
 def test_tool_registry_registers_all_tools():
     expected = [
         "search_jobs",
