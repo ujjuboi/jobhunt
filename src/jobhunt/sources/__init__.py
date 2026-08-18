@@ -42,7 +42,7 @@ class SourceAdapter(ABC):
         )
 
 
-def get_source_adapter(source_type: str, api_key: str = None) -> SourceAdapter:
+def get_source_adapter(source_type: str, api_key: str = None, **kwargs) -> SourceAdapter:
     """Factory function to get a source adapter instance"""
     if source_type.lower() == 'greenhouse':
         from .greenhouse import GreenhouseAdapter
@@ -53,5 +53,17 @@ def get_source_adapter(source_type: str, api_key: str = None) -> SourceAdapter:
     elif source_type.lower() == 'ashby':
         from .ashby import AshbyAdapter
         return AshbyAdapter(api_key)
+    elif source_type.lower() == 'linkedin':
+        from .linkedin import LinkedInAdapter
+        # LinkedIn requires email and password, not an API key
+        email = kwargs.get('email')
+        password = kwargs.get('password')
+        if not email or not password:
+            raise ValueError("LinkedIn adapter requires email and password")
+        return LinkedInAdapter(email=email, password=password)
+    elif source_type.lower() == 'indeed':
+        from .indeed import IndeedAdapter
+        # Indeed doesn't require an API key
+        return IndeedAdapter()
     else:
         raise ValueError(f"Unknown source type: {source_type}")

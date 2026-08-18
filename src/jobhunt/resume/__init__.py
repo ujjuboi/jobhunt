@@ -9,7 +9,7 @@ from .cover_letter import CoverLetterGenerator, CoverLetter
 from .pdf_converter import convert_docx_to_pdf, is_libreoffice_available
 
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class ResumeManager:

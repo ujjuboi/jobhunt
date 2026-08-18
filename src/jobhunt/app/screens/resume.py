@@ -2,10 +2,10 @@
 Resume screen for JobHunt application
 """
 from .base import BaseScreen
-from textual.widgets import Static, Button, TextArea, Select, Input
+from textual.widgets import Static, Button, TextArea, Select
 from textual.containers import Container
-from textual.app import ComposeResult
 from jobhunt.resume import ResumeManager
+from jobhunt.agent import JobHuntAgent
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,12 +14,24 @@ logger = logging.getLogger(__name__)
 class ResumeScreen(BaseScreen):
     """Resume screen for resume management"""
 
-    def __init__(self):
+    def __init__(self, db=None):
         super().__init__(name="resume")
+        self.db = db
         self.resume_manager = None
+        self._agent = None
         self._selected_resume = None
         self._selected_job_id = None
         self._selected_job_description = None
+        self._selected_company = None
+
+    @property
+    def agent(self):
+        if self._agent is None:
+            try:
+                self._agent = JobHuntAgent(db=self.db)
+            except Exception:
+                logger.warning("Could not create agent (oMLX may be unavailable)")
+        return self._agent
 
     def _get_content(self):
         return Container(
@@ -28,7 +40,6 @@ class ResumeScreen(BaseScreen):
             Select(
                 options=[],
                 id="resume_select",
-                placeholder="Select a resume...",
             ),
             Static("", id="resume_status"),
             TextArea(id="resume_preview", read_only=True, show_line_numbers=False),
@@ -109,7 +120,7 @@ class ResumeScreen(BaseScreen):
         try:
             profile = self.resume_manager.load_profile_from_docx(self._selected_resume)
             tailored = self.resume_manager.generate_tailored_resume(
-                profile, self._selected_job_description
+                profile, self._selected_job_description, agent=self.agent,
             )
 
             lines = [f"Summary: {tailored.summary}", "", "Skills:"]
@@ -141,7 +152,8 @@ class ResumeScreen(BaseScreen):
         try:
             profile = self.resume_manager.load_profile_from_docx(self._selected_resume)
             cover_letter = self.resume_manager.generate_cover_letter(
-                profile, self._selected_job_description
+                profile, self._selected_job_description,
+                company_name=self._selected_company, agent=self.agent,
             )
 
             self.query_one("#resume_preview", TextArea).text = cover_letter.content

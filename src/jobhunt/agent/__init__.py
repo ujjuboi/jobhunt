@@ -2,6 +2,7 @@
 Agent module for JobHunt
 Handles tool calling and agent loop
 """
+import os
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from ..config import get_omlx_settings
@@ -73,10 +74,14 @@ class ToolRegistry:
             return []
             
         try:
-            # Handle special case for LinkedIn and Indeed which have different initialization
-            if source.lower() in ['linkedin', 'indeed']:
-                # These require special parameters, but we leave it to the calling code to handle this
-                adapter = get_source_adapter(source)
+            # LinkedIn needs credentials (env overridable); other sources are
+            # API-key-less by default (greenhouse/lever/ashby accept None).
+            if source.lower() == 'linkedin':
+                adapter = get_source_adapter(
+                    source,
+                    email=os.environ.get('LINKEDIN_EMAIL'),
+                    password=os.environ.get('LINKEDIN_PASSWORD'),
+                )
             else:
                 adapter = get_source_adapter(source)
                 

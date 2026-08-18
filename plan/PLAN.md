@@ -107,7 +107,8 @@ jobhunt/
 - Fit screen: ranked, scored, explainable
 
 **Phase 4 — Resume + cover letters (1.5-2 days)**
-- Parse base resume DOCX -> structured Profile (sections, bullets, skills); cache as JSON
+- Base resume DOCX lives in `../Resumes/` (sibling to project root); user selects a DOCX from that directory at startup
+- Parse selected base resume DOCX -> structured Profile (sections, bullets, skills); cache as JSON
 - LLM tailors bullets to JD (ATS keyword emphasis, quantified)
 - Rebuild DOCX from template; `soffice --headless --convert-to pdf`
 - Cover letter generation (from Profile + JD)
@@ -135,4 +136,4 @@ jobhunt/
 ## 6. Open confirmations
 1. Project dir `~/Documents/Study/projects/python/jobhunt` — confirmed.
 2. Sources: Greenhouse/Lever/Ashby first, LinkedIn/Indeed later — confirmed.
-3. Resume DOCX path needed in Phase 4 (user to provide).
+3. Base resume directory: `../Resumes/` (relative to project root) — user picks a DOCX from there at runtime.

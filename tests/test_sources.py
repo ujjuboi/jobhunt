@@ -1,12 +1,16 @@
 """
-Source adapter tests: field mapping, date parsing, dedupe-safe tags.
-HTTP is mocked so the tests run offline against fixture payloads.
+Source adapter tests: field mapping, date parsing, dedupe-safe tags, and
+Playwright adapters' URL/id extraction. HTTP is mocked so the API-based
+tests run offline against fixture payloads.
 """
 import httpx
 
+from jobhunt.sources import get_source_adapter
 from jobhunt.sources.greenhouse import GreenhouseAdapter
 from jobhunt.sources.lever import LeverAdapter
 from jobhunt.sources.ashby import AshbyAdapter
+from jobhunt.sources.linkedin import LinkedInAdapter
+from jobhunt.sources.indeed import IndeedAdapter
 
 
 class FakeResponse:
@@ -117,3 +121,46 @@ def test_ashby_reads_jobs_array(monkeypatch):
 def test_ashby_empty_jobs_array_is_not_an_error(monkeypatch):
     monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResponse({"apiVersion": "1", "jobs": []}))
     assert AshbyAdapter().get_jobs("acme") == []
+
+
+def test_get_source_adapter():
+    """Test that the factory returns the correct adapter types"""
+    assert isinstance(get_source_adapter('greenhouse'), GreenhouseAdapter)
+    assert isinstance(get_source_adapter('lever'), LeverAdapter)
+    assert isinstance(get_source_adapter('ashby'), AshbyAdapter)
+    assert isinstance(get_source_adapter('indeed'), IndeedAdapter)
+
+    # LinkedIn requires email/password
+    try:
+        get_source_adapter('linkedin')
+        raise AssertionError("Expected ValueError for LinkedIn without credentials")
+    except ValueError:
+        pass
+
+    linkedin = get_source_adapter('linkedin', email='a@b.c', password='secret')
+    assert isinstance(linkedin, LinkedInAdapter)
+    assert linkedin.email == 'a@b.c'
+
+    try:
+        get_source_adapter('unknown-source')
+        raise AssertionError("Expected ValueError for unknown source")
+    except ValueError:
+        pass
+
+
+def test_linkedin_extracts_job_id():
+    """Job ids must be extracted from /jobs/view/<id> hrefs with trailing slashes."""
+    adapter = LinkedInAdapter(email="a@b.c", password="secret")
+    assert adapter._extract_job_id("https://www.linkedin.com/jobs/view/3950772534/") == "3950772534"
+    assert adapter._extract_job_id("/jobs/view/3950772534?refId=xyz") == "3950772534"
+    assert adapter._extract_job_id("https://www.linkedin.com/jobs/view/12?trk=pp") == "12"
+    assert adapter._extract_job_id("") == ""
+
+
+def test_indeed_extracts_job_id():
+    """Indeed ids are the jk query param, not the last path segment."""
+    adapter = IndeedAdapter()
+    assert adapter._extract_job_id("https://www.indeed.com/viewjob?jk=abc123&tk=xyz") == "abc123"
+    assert adapter._extract_job_id("/viewjob?jk=abc123") == "abc123"
+    assert adapter._extract_job_id("https://www.indeed.com/rc/clk?jk=def456") == "def456"
+    assert adapter._extract_job_id("") == ""
