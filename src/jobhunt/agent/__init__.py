@@ -12,6 +12,9 @@ from ..embeddings import EmbeddingClient
 from ..scoring import ScorePipeline
 import json
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -70,7 +73,13 @@ class ToolRegistry:
             return []
             
         try:
-            adapter = get_source_adapter(source)
+            # Handle special case for LinkedIn and Indeed which have different initialization
+            if source.lower() in ['linkedin', 'indeed']:
+                # These require special parameters, but we leave it to the calling code to handle this
+                adapter = get_source_adapter(source)
+            else:
+                adapter = get_source_adapter(source)
+                
             if company:
                 jobs = adapter.get_jobs(company, limit)
             else:
@@ -128,13 +137,96 @@ class ToolRegistry:
         
     def tailor_resume(self, job_id: str, profile: Profile) -> str:
         """Tailor resume for a specific job"""
-        # This will be expanded in Phase 4
-        return "Tailored resume content would be generated here"
-        
+        job = self.db.get_job(job_id) if self.db else None
+        if not job:
+            return f"Job {job_id} not found"
+
+        try:
+            from ..resume import ResumeManager
+            from ..resume.profile_parser import Profile as RProfile
+
+            manager = ResumeManager()
+
+            # Convert models.Profile dict-style experience to resume.Profile ResumeSections
+            resume_profile = self._convert_profile(profile)
+
+            tailored = manager.generate_tailored_resume(
+                resume_profile, job.description, agent=self.agent,
+            )
+            artifacts = manager.save_tailored_resume(
+                tailored, job.company, job.id,
+            )
+            return json.dumps({
+                "status": "ok",
+                "summary": tailored.summary,
+                "skills": tailored.updated_skills,
+                "artifacts": artifacts,
+            }, indent=2)
+        except FileNotFoundError as e:
+            return f"Resume directory not found: {e}"
+        except Exception as e:
+            logger.exception("tailor_resume failed")
+            return f"Error tailoring resume: {e}"
+
     def generate_cover_letter(self, job_id: str, profile: Profile) -> str:
         """Generate cover letter for a specific job"""
-        # This will be expanded in Phase 4
-        return "Cover letter content would be generated here"
+        job = self.db.get_job(job_id) if self.db else None
+        if not job:
+            return f"Job {job_id} not found"
+
+        try:
+            from ..resume import ResumeManager
+
+            manager = ResumeManager()
+            resume_profile = self._convert_profile(profile)
+
+            cover_letter = manager.generate_cover_letter(
+                resume_profile, job.description,
+                company_name=job.company, agent=self.agent,
+            )
+            path = manager.save_cover_letter_to_output(
+                cover_letter, job.company, job.id,
+            )
+            return json.dumps({
+                "status": "ok",
+                "path": path,
+                "preview": cover_letter.content[:500],
+            }, indent=2)
+        except FileNotFoundError as e:
+            return f"Resume directory not found: {e}"
+        except Exception as e:
+            logger.exception("generate_cover_letter failed")
+            return f"Error generating cover letter: {e}"
+
+    @staticmethod
+    def _convert_profile(profile: Profile):
+        """Convert models.Profile (dict-style) to resume.profile_parser.Profile (ResumeSection-style)."""
+        from ..resume.profile_parser import Profile as RProfile, ResumeSection
+
+        def _dicts_to_sections(items):
+            sections = []
+            for item in items:
+                if isinstance(item, dict):
+                    sections.append(ResumeSection(
+                        title=item.get("title", ""),
+                        content=item.get("content", ""),
+                        bullets=item.get("bullets", []),
+                    ))
+                elif hasattr(item, "title"):
+                    sections.append(item)
+            return sections
+
+        return RProfile(
+            name=profile.name or "",
+            email=profile.email or "",
+            phone=profile.phone or "",
+            summary=profile.summary or "",
+            skills=profile.skills or [],
+            certifications=profile.certifications or [],
+            experience=_dicts_to_sections(profile.experience),
+            education=_dicts_to_sections(profile.education),
+            projects=_dicts_to_sections(profile.projects),
+        )
         
     def update_status(self, job_id: str, status: str) -> bool:
         """Update job application status"""

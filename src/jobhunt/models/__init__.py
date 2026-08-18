@@ -27,14 +27,16 @@ class Job(BaseModel):
 
 class Profile(BaseModel):
     """User's resume/profile information"""
-    name: str
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    name: str = ""
+    email: str = ""
+    phone: str = ""
     location: Optional[str] = None
-    summary: Optional[str] = None
+    summary: str = ""
     experience: List[Dict[str, Any]] = []
     education: List[Dict[str, Any]] = []
     skills: List[str] = []
+    certifications: List[str] = []
+    projects: List[Dict[str, Any]] = []
     # Section for LinkedIn profile if needed
     linkedin_url: Optional[str] = None
 

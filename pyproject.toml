@@ -25,6 +25,7 @@ dependencies = [
     "pydantic",
     "rich",
     "numpy",
+    "playwright",
 ]
 
 [dependency-groups]
