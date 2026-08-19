@@ -68,7 +68,8 @@ def test_settings_save_writes_user_config(monkeypatch):
     cfg = captured["config"]
     assert isinstance(cfg, UserConfig)
     assert cfg.sources.enabled == ["greenhouse", "ashby"]
-    assert cfg.sources.companies == {"greenhouse": ["stripe", "ramp"]}
+    # Companies are distributed round-robin across enabled sources
+    assert cfg.sources.companies == {"greenhouse": ["stripe"], "ashby": ["ramp"]}
     assert cfg.model.chat == "ACustomModel"
     assert cfg.scoring.mode == "llm"
     assert cfg.prompts.system == "Be concise."

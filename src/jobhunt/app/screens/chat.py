@@ -2,6 +2,7 @@
 Chat screen for JobHunt application
 """
 import asyncio
+import logging
 from typing import List, Dict
 
 from textual.widgets import Static, Input, Button, TextArea
@@ -11,6 +12,8 @@ from .base import BaseScreen
 from ...agent import JobHuntAgent
 from ...config import get_user_config
 from ...db import JobHuntDB
+
+logger = logging.getLogger(__name__)
 
 
 class ChatScreen(BaseScreen):
