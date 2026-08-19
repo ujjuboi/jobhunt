@@ -37,6 +37,12 @@ class FitScreen(BaseScreen):
 
     def on_mount(self):
         """Initialize the screen when mounted"""
+        table = self.query_one("#fit_table", DataTable)
+        table.add_column("Rank", key="rank", width=6)
+        table.add_column("Title", key="title", width=30)
+        table.add_column("Company", key="company", width=20)
+        table.add_column("Location", key="location", width=15)
+        table.add_column("Score", key="score", width=8)
         self._update_status()
 
     def on_button_pressed(self, event):
@@ -111,12 +117,6 @@ class FitScreen(BaseScreen):
         if not fits:
             self._update_status("No scores could be computed (check profile and oMLX).")
             return
-
-        table.add_column("Rank", key="rank", width=6)
-        table.add_column("Title", key="title", width=30)
-        table.add_column("Company", key="company", width=20)
-        table.add_column("Location", key="location", width=15)
-        table.add_column("Score", key="score", width=8)
 
         for rank, fit in enumerate(fits, start=1):
             job = self.db.get_job(fit.job_id)
