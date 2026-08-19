@@ -207,26 +207,22 @@ class DocxParser:
         title = "Experience"
         bullets = []
         
-        # Look for section title or use default
         for item in content:
             if item.lower() in ["experience", "work experience"]:
                 continue
-            elif self._is_bullet_point(item) or self._is_experience_timeline(item):
-                bullets.append(item)
+            bullets.append(item)
         
         return ResumeSection(title=title, content=" ".join(content), bullets=bullets)
         
     def _parse_education_section(self, content: List[str]) -> ResumeSection:
         """Parse education section into structured data"""
         title = "Education"
-        bullets = [item for item in content if self._is_bullet_point(item)]
-        return ResumeSection(title=title, content=" ".join(content), bullets=bullets)
+        return ResumeSection(title=title, content=" ".join(content), bullets=list(content))
         
     def _parse_projects_section(self, content: List[str]) -> ResumeSection:
         """Parse projects section into structured data"""
         title = "Projects"
-        bullets = [item for item in content if self._is_bullet_point(item)]
-        return ResumeSection(title=title, content=" ".join(content), bullets=bullets)
+        return ResumeSection(title=title, content=" ".join(content), bullets=list(content))
         
     def _clean_profile(self):
         """Clean and finalize the profile"""
