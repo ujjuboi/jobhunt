@@ -8,6 +8,7 @@ from jobhunt.app.screens import chat as chat_module
 from jobhunt.app.screens.chat import ChatScreen
 from jobhunt.app.screens.dashboard import DashboardScreen
 from jobhunt.agent import ToolRegistry
+from jobhunt.db import JobHuntDB
 
 
 def test_app_mounts_to_dashboard():
@@ -149,5 +150,86 @@ def test_chat_surfaces_agent_error(monkeypatch):
                     break
             await asyncio.sleep(0.2)
             assert "Error:" in app.screen.query_one("#chat_messages").text
+
+    asyncio.run(run())
+
+
+def test_dashboard_mount_renders_counts():
+    """Dashboard should render job and application counts on mount."""
+    
+    async def run():
+        app = JobHuntApp()
+        # Mock the database to return specific counts
+        app.database = JobHuntDB()
+        # Create some test data
+        from jobhunt.models import Job, Application
+        # Add test job
+        test_job = Job(
+            id="test_job",
+            title="Test Job",
+            company="Test Corp",
+            location="Test Location",
+            description="Test job description",
+            url="http://test.com",
+            source="test",
+            posted_date="2023-01-01"
+        )
+        app.database.save_job(test_job)
+        # Add test application
+        test_application = Application(
+            job_id="test_job",
+            status="applied",
+            applied_date="2023-01-01"
+        )
+        app.database.save_application(test_application)
+        
+        async with app.run_test() as pilot:
+            await asyncio.sleep(0.1)
+            # Check that dashboard is displayed
+            assert isinstance(app.screen, DashboardScreen)
+            # Check that status shows the counts
+            status_widget = app.screen.query_one("#status", Static)
+            status_content = status_widget.content
+            assert "Total Jobs: 1" in str(status_content)
+            assert "Applications: 1" in str(status_content)
+            
+    asyncio.run(run())
+
+
+def test_dashboard_quick_actions_switch_screens():
+    """Dashboard quick action buttons should switch screens."""
+    
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            # Click search jobs button
+            await pilot.click("#search_jobs_btn")
+            await asyncio.sleep(0.1)
+            # Should be on search screen
+            from jobhunt.app.screens.search import SearchScreen
+            assert isinstance(app.screen, SearchScreen)
+            
+            # Go back to dashboard
+            await pilot.click("#dashboard_btn")
+            await asyncio.sleep(0.1)
+            
+            # Click view jobs button
+            await pilot.click("#view_jobs_btn")
+            await asyncio.sleep(0.1)
+            # Should be on jobs screen
+            from jobhunt.app.screens.jobs import JobsScreen
+            assert isinstance(app.screen, JobsScreen)
+            
+            # Go back to dashboard
+            await pilot.click("#dashboard_btn")
+            await asyncio.sleep(0.1)
+            
+            # Click generate resume button
+            await pilot.click("#generate_resume_btn")
+            await asyncio.sleep(0.1)
+            # Should be on resume screen
+            from jobhunt.app.screens.resume import ResumeScreen
+            assert isinstance(app.screen, ResumeScreen)
 
     asyncio.run(run())

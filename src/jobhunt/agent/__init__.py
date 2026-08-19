@@ -69,7 +69,7 @@ class ToolRegistry:
     
     # Tool implementations
     
-    def search_jobs(self, query: str, source: str = "", company: str = "", limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, source: str = "", company: str = "", limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query on specified source."""
         if not self.db:
             return []
@@ -102,14 +102,18 @@ class ToolRegistry:
             # Deduplicate jobs
             jobs = self._dedupe_jobs(jobs)
 
-            # Save jobs to database
+            # Save jobs to database (also set source on each job)
             for job in jobs:
+                # Set the source on each job (for the UI to display it)
+                job.source = source
                 self.db.save_job(job)
 
             return jobs
 
         except Exception as e:
             logger.warning("Error searching jobs via %s: %s", source, e, exc_info=True)
+            if raise_errors:
+                raise
             return []
 
     def get_job_detail(self, job_id: str) -> Optional[Job]:

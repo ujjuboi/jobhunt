@@ -43,11 +43,14 @@ class BaseScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle navigation button presses"""
         button_id = event.button.id
+        # Check if this is a navigation button first
         for btn_id, screen, _ in self.NAV_BUTTONS:
             if button_id == btn_id:
                 if self.screen_name != screen:
                     self.app.switch_screen(screen)
-                break
+                return
+        # If not a nav button, call super() for other button handling
+        super().on_button_pressed(event)
 
     def _get_content(self):
         """Override this in subclasses to provide specific content"""

@@ -107,3 +107,79 @@ def test_output_dir_creation(tmp_path):
     out = manager.get_output_dir("Acme Corp", "senior-dev-123")
     assert out.exists()
     assert out == tmp_path / "outputs" / "acme_corp" / "senior-dev-123"
+
+
+def test_to_db_profile_converter():
+    """Test the to_db_profile converter function."""
+    from jobhunt.models import Profile as DBProfile
+    from jobhunt.resume.profile_parser import Profile, ResumeSection
+    
+    # Create a resume profile with various sections
+    resume_profile = Profile(
+        name="John Doe",
+        email="john@example.com",
+        phone="555-1234",
+        summary="Experienced software developer",
+        skills=["Python", "JavaScript", "SQL"],
+        certifications=["AWS Certified", "Oracle Certified"],
+        experience=[
+            ResumeSection(
+                title="Senior Developer",
+                content="Developed applications",
+                bullets=["Led team of 5 developers", "Improved performance by 30%"]
+            )
+        ],
+        education=[
+            ResumeSection(
+                title="B.S. Computer Science",
+                content="University of Example",
+                bullets=["Graduated with honors", "Dean's List"]
+            )
+        ],
+        projects=[
+            ResumeSection(
+                title="JobHunt Application",
+                content="Built a job hunting application",
+                bullets=["Used Python and Textual", "Implemented search features"]
+            )
+        ]
+    )
+    
+    # Create resume manager to test converter
+    manager = ResumeManager.__new__(ResumeManager)
+    
+    # Test the conversion
+    db_profile = manager.to_db_profile(resume_profile)
+    
+    # Check that all fields are properly mapped
+    assert db_profile.name == resume_profile.name
+    assert db_profile.email == resume_profile.email
+    assert db_profile.phone == resume_profile.phone
+    assert db_profile.summary == resume_profile.summary
+    assert db_profile.skills == resume_profile.skills
+    assert db_profile.certifications == resume_profile.certifications
+    
+    # Check experience section conversion
+    assert len(db_profile.experience) == 1
+    exp = db_profile.experience[0]
+    assert exp["title"] == "Senior Developer"
+    assert exp["content"] == "Developed applications"
+    assert exp["bullets"] == ["Led team of 5 developers", "Improved performance by 30%"]
+    
+    # Check education section conversion
+    assert len(db_profile.education) == 1
+    edu = db_profile.education[0]
+    assert edu["title"] == "B.S. Computer Science"
+    assert edu["content"] == "University of Example"
+    assert edu["bullets"] == ["Graduated with honors", "Dean's List"]
+    
+    # Check projects section conversion
+    assert len(db_profile.projects) == 1
+    project = db_profile.projects[0]
+    assert project["title"] == "JobHunt Application"
+    assert project["content"] == "Built a job hunting application"
+    assert project["bullets"] == ["Used Python and Textual", "Implemented search features"]
+    
+    # Check that optional fields are None
+    assert db_profile.location is None
+    assert db_profile.linkedin_url is None

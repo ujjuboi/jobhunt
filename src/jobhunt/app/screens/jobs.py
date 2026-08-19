@@ -24,6 +24,7 @@ class JobsScreen(BaseScreen):
         return Container(
             Static("Job Listings", id="jobs_title"),
             DataTable(id="jobs_table"),
+            Static("", id="jobs_status"),
             Button("Refresh", id="refresh_button"),
             id="jobs_content"
         )
@@ -32,10 +33,21 @@ class JobsScreen(BaseScreen):
         """Initialize the screen when mounted"""
         self._load_jobs()
         
-    def on_button_pressed(self, event):
-        """Handle button presses"""
-        if event.button.id == "refresh_button":
-            self._load_jobs()
+    def on_data_table_row_selected(self, event):
+        """Handle row selection events"""
+        if event.row_key is not None:
+            job_id = event.row_key.value
+            self.app.selected_job_id = job_id
+            # Get the job details for display
+            if self.db is not None:
+                job = self.db.get_job(job_id)
+                if job:
+                    status_text = f"Selected: {job.title}"
+                    self.query_one("#jobs_status").update(status_text)
+                else:
+                    self.query_one("#jobs_status").update(f"Selected job ID: {job_id}")
+            else:
+                self.query_one("#jobs_status").update(f"Selected job ID: {job_id}")
     
     def _load_jobs(self):
         """Load jobs into the table"""
@@ -88,5 +100,6 @@ class JobsScreen(BaseScreen):
                 job.title[:30] + "..." if len(job.title) > 30 else job.title,
                 job.company[:20] + "..." if len(job.company) > 20 else job.company,
                 job.location or "N/A",
-                job.posted_date.strftime("%Y-%m-%d") if job.posted_date else "N/A"
+                job.posted_date.strftime("%Y-%m-%d") if job.posted_date else "N/A",
+                key=job.id  # Add job ID as key for row selection
             )
