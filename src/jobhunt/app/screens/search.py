@@ -2,6 +2,7 @@
 Search screen for JobHunt application
 """
 import asyncio
+import logging
 from typing import Optional
 
 from textual.widgets import Static, Input, Button, TextArea
@@ -11,6 +12,8 @@ from .base import BaseScreen
 from ...agent import JobHuntAgent
 from ...db import JobHuntDB
 from ...config.user_config import get_user_config
+
+logger = logging.getLogger(__name__)
 
 
 class SearchScreen(BaseScreen):
@@ -67,7 +70,7 @@ class SearchScreen(BaseScreen):
             if jobs:
                 for i, job in enumerate(jobs[:10]):  # Show top 10 results
                     # Add source tag for jobs
-                    source_tag = f" [({job.source})]" if hasattr(job, 'source') and job.source else ""
+                    source_tag = f" [{job.source}]" if job.source else ""
                     results_text += f"{i+1}. {job.title} at {job.company}{source_tag}\n"
                     results_text += f"   Location: {job.location or 'N/A'}\n"
                     results_text += f"   URL: {job.url or 'N/A'}\n"
@@ -127,11 +130,13 @@ class SearchScreen(BaseScreen):
             seen_keys = set()
             deduped_jobs = []
             for job in all_jobs:
-                # Create a key from title and company, fallback to job.id if empty
                 title = job.title or ""
                 company = job.company or ""
-                key = (title.lower(), company.lower()) if title or company else None
-                if key and key not in seen_keys:
+                if title or company:
+                    key = (title.lower(), company.lower())
+                else:
+                    key = getattr(job, 'id', None)
+                if key is not None and key not in seen_keys:
                     seen_keys.add(key)
                     deduped_jobs.append(job)
             all_jobs = deduped_jobs

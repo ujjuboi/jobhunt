@@ -247,13 +247,14 @@ class ResumeScreen(BaseScreen):
             company = self._last_cover_letter_company
             
         if job_id is None or company is None:
-            # Fallback to current selection if we don't have captured info
-            job, job_id, company = self._resolve_selected_job()
-            if job is None:
-                self.query_one("#resume_status").update(
-                    "Select a job from the Jobs screen first"
-                )
-                return
+            # Snapshots should always be set when generation succeeds.
+            # If we reach here, something went wrong — warn rather than
+            # silently falling back to the current selection.
+            self.query_one("#resume_status").update(
+                "Warning: Could not determine which job to save for. "
+                "Please regenerate and save immediately."
+            )
+            return
             
         # Save tailored resume if available
         saved_paths = []

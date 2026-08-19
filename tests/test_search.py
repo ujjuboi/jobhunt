@@ -44,7 +44,8 @@ def test_search_single_source():
             query="test query", 
             source="greenhouse", 
             company="", 
-            limit=20
+            limit=20,
+            raise_errors=True
         )
         assert len(jobs) == 1
 
@@ -80,14 +81,16 @@ def test_search_multiple_sources():
             query="test query", 
             source="greenhouse", 
             company="", 
-            limit=20
+            limit=20,
+            raise_errors=True
         )
         mock_agent.run_tool.assert_any_call(
             "search_jobs", 
             query="test query", 
             source="lever", 
             company="", 
-            limit=20
+            limit=20,
+            raise_errors=True
         )
         assert len(jobs) == 2
 
@@ -103,7 +106,7 @@ def test_search_with_source_error():
     mock_job = Mock()
     mock_job.title = "Software Engineer"
     mock_job.company = "Test Corp"
-    mock_agent.run_tool.side_effect = [mock_job, Exception("Source failed")]
+    mock_agent.run_tool.side_effect = [[mock_job], Exception("Source failed")]
     
     with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
         screen = SearchScreen()
@@ -113,3 +116,39 @@ def test_search_with_source_error():
         
         # Should return results from successful source
         assert len(jobs) == 1
+
+
+def test_search_dedup_empty_title_falls_back_to_id():
+    """Test that jobs with empty titles are deduplicated by job.id."""
+    mock_config = Mock()
+    mock_config.sources.enabled = ["greenhouse", "lever"]
+    
+    mock_agent = Mock()
+    # Two jobs with empty title/company but different IDs
+    mock_job1 = Mock()
+    mock_job1.title = ""
+    mock_job1.company = ""
+    mock_job1.id = "job-1"
+    mock_job2 = Mock()
+    mock_job2.title = ""
+    mock_job2.company = ""
+    mock_job2.id = "job-2"
+    # A duplicate with same ID as job1
+    mock_job3 = Mock()
+    mock_job3.title = ""
+    mock_job3.company = ""
+    mock_job3.id = "job-1"
+    
+    mock_agent.run_tool.side_effect = [[mock_job1, mock_job3], [mock_job2]]
+    
+    with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
+        screen = SearchScreen()
+        screen.agent = mock_agent
+        
+        jobs = screen._search("test query")
+        
+        # job-1 and job-2 should be kept, job-3 (duplicate of job-1) dropped
+        assert len(jobs) == 2
+        ids = [j.id for j in jobs]
+        assert "job-1" in ids
+        assert "job-2" in ids

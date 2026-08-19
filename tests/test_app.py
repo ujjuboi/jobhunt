@@ -3,6 +3,8 @@ Phase 1 tests: app mount, navigation, tool registry, lazy config.
 """
 import asyncio
 
+from textual.widgets import Static
+
 from jobhunt.app import JobHuntApp
 from jobhunt.app.screens import chat as chat_module
 from jobhunt.app.screens.chat import ChatScreen
