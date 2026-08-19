@@ -68,17 +68,16 @@ class SearchScreen(BaseScreen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "search_input":
             return
-        self._render(event.input.value)
+        self._render_results(event.input.value)
 
     # ── browse (network) ──────────────────────────────────────────────────
 
-    def _async_browse(self):
+    async def _async_browse(self):
         """Async wrapper: runs blocking browse off the event loop."""
         try:
-            jobs = asyncio.to_thread(self._browse)
-            self.all_jobs = jobs
+            self.all_jobs = await asyncio.to_thread(self._browse)
             query = self.query_one("#search_input", Input).value
-            self.call_after_refresh(self._render, query)
+            self.call_after_refresh(self._render_results, query)
         except Exception as exc:
             self.call_after_refresh(self._set_status, f"Error: {exc}")
         finally:
@@ -142,7 +141,7 @@ class SearchScreen(BaseScreen):
 
     # ── filtering & rendering ─────────────────────────────────────────────
 
-    def _render(self, query: str) -> None:
+    def _render_results(self, query: str) -> None:
         """Filter all_jobs by query and update the results area."""
         filtered = self._filter(self.all_jobs, query) if query else self.all_jobs
         total = len(self.all_jobs)

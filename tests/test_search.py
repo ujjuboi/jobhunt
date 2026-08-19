@@ -1,5 +1,9 @@
 """
-Test cases for the search screen functionality.
+Test cases for the search screen (config-driven browse + local filtering).
+
+The screen fetches jobs from every configured source on mount/refresh and
+then narrows the result list as the user types. Greenhouse/Lever/Ashby are
+company-only boards; only Indeed/LinkedIn provide a site-wide search.
 """
 import pytest
 from unittest.mock import Mock, patch
@@ -8,7 +12,7 @@ from jobhunt.app.screens.search import SearchScreen
 
 
 def _make_job(title, company, job_id=None, location=None, source=None):
-    """Build a lightweight job stand-in (Mock is enough for _search)."""
+    """Build a lightweight job stand-in (Mock is enough for the screen logic)."""
     job = Mock()
     job.title = title
     job.company = company
@@ -20,30 +24,32 @@ def _make_job(title, company, job_id=None, location=None, source=None):
     return job
 
 
-def _make_config(sources):
-    """Build a mocked UserConfig with an iterable enabled-source list."""
+def _make_config(sources, companies=None):
+    """Build a mocked UserConfig with iterable per-source company lookups."""
     mock_config = Mock()
     mock_config.sources.enabled = list(sources)
+    mock_config.sources.companies = dict(companies or {})
+    mock_config.companies_for = Mock(
+        side_effect=lambda source: list((companies or {}).get(source, []))
+    )
     return mock_config
 
 
-def test_search_with_no_enabled_sources():
-    """Test search when no sources are enabled."""
-    # Mock the get_user_config function to return a config with no enabled sources
+def test_browse_no_enabled_sources_returns_empty():
+    """Test browse when no sources are enabled."""
     mock_config = _make_config([])
 
     with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
         screen = SearchScreen()
-        jobs = screen._search("test query")
+        jobs = screen._browse()
         assert jobs == []
         assert screen.search_notes == []
 
 
-def test_search_keyword_source():
-    """Test search with a single keyword-searchable source (indeed/linkedin)."""
+def test_browse_keyword_source_uses_board_search():
+    """Indeed/LinkedIn are browsed with a full board search (no company)."""
     mock_config = _make_config(["indeed"])
 
-    # Mock agent and its run_tool method
     mock_agent = Mock()
     mock_agent.run_tool.return_value = [_make_job("Software Engineer", "Test Corp")]
 
@@ -51,63 +57,53 @@ def test_search_keyword_source():
         screen = SearchScreen()
         screen.agent = mock_agent
 
-        jobs = screen._search("software engineer")
+        jobs = screen._browse()
 
-        # Keyword sources are queried with an empty company (board search)
         mock_agent.run_tool.assert_called_once_with(
             "search_jobs",
-            query="software engineer",
+            query="",
             source="indeed",
             company="",
-            limit=20,
+            limit=50,
             raise_errors=True
         )
         assert len(jobs) == 1
 
 
-def test_search_multiple_keyword_sources():
-    """Test search aggregates across multiple keyword-searchable sources."""
-    mock_config = _make_config(["indeed", "linkedin"])
+def test_browse_company_only_boards_fetch_each_slug():
+    """Greenhouse/Lever/Ashby fetch every configured company slug."""
+    mock_config = _make_config(
+        ["greenhouse"],
+        companies={"greenhouse": ["gitlab", "stripe"]},
+    )
 
     mock_agent = Mock()
-    mock_job1 = _make_job("Software Engineer", "Test Corp", source="indeed")
-    mock_job2 = _make_job("Frontend Developer", "Another Corp", source="linkedin")
-
-    mock_agent.run_tool.side_effect = [[mock_job1], [mock_job2]]
+    mock_agent.run_tool.side_effect = [
+        [_make_job("Backend Engineer", "gitlab", source="greenhouse")],
+        [_make_job("Staff Engineer", "stripe", source="greenhouse")],
+    ]
 
     with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
         screen = SearchScreen()
         screen.agent = mock_agent
 
-        jobs = screen._search("engineer")
+        jobs = screen._browse()
 
         assert mock_agent.run_tool.call_count == 2
+        mock_agent.run_tool.assert_any_call(
+            "search_jobs", query="", source="greenhouse", company="gitlab",
+            limit=50, raise_errors=True
+        )
+        mock_agent.run_tool.assert_any_call(
+            "search_jobs", query="", source="greenhouse", company="stripe",
+            limit=50, raise_errors=True
+        )
         assert len(jobs) == 2
-        assert {j.source for j in jobs} == {"indeed", "linkedin"}
 
 
-def test_search_skips_company_only_sources():
-    """Greenhouse/Lever/Ashby must not be queried by a keyword search."""
-    mock_config = _make_config(["greenhouse", "indeed"])
-
-    mock_agent = Mock()
-    mock_agent.run_tool.return_value = [_make_job("Backend Engineer", "Some Corp", source="indeed")]
-
-    with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
-        screen = SearchScreen()
-        screen.agent = mock_agent
-
-        jobs = screen._search("engineer")
-
-        # Only the keyword source is queried
-        mock_agent.run_tool.assert_called_once()
-        assert mock_agent.run_tool.call_args.kwargs["source"] == "indeed"
-        assert len(jobs) == 1
-
-
-def test_search_company_only_sources_produce_note():
-    """If only company-only sources are enabled, search reports it as a note."""
-    mock_config = _make_config(["greenhouse", "ashby"])
+def test_browse_company_only_without_companies_notes_them():
+    """A company-only source with no configured slugs records a note."""
+    mock_config = _make_config(["greenhouse"])
 
     mock_agent = Mock()
 
@@ -115,58 +111,101 @@ def test_search_company_only_sources_produce_note():
         screen = SearchScreen()
         screen.agent = mock_agent
 
-        jobs = screen._search("engineer")
+        jobs = screen._browse()
 
         assert jobs == []
         assert not mock_agent.run_tool.called
         assert len(screen.search_notes) == 1
         assert "greenhouse" in screen.search_notes[0]
-        assert "ashby" in screen.search_notes[0]
-        assert "keyword search" in screen.search_notes[0]
+        assert "no companies configured" in screen.search_notes[0]
 
 
-def test_search_with_source_error_surfaces_notes():
-    """Test search when a keyword source fails: note records the failure."""
-    mock_config = _make_config(["indeed", "linkedin"])
+def test_browse_surface_source_failures():
+    """A failing source/slug is recorded as a note; other results survive."""
+    mock_config = _make_config(
+        ["greenhouse", "indeed"],
+        companies={"greenhouse": ["gitlab"]},
+    )
 
     mock_agent = Mock()
-    mock_job = _make_job("Software Engineer", "Test Corp", source="indeed")
-    mock_agent.run_tool.side_effect = [[mock_job], Exception("Board search failed")]
+    ok = _make_job("Backend Engineer", "gitlab", source="greenhouse")
+    mock_agent.run_tool.side_effect = [[ok], Exception("404 Not Found")]
 
     with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
         screen = SearchScreen()
         screen.agent = mock_agent
 
-        jobs = screen._search("engineer")
+        jobs = screen._browse()
 
-        # Should return results from successful source
         assert len(jobs) == 1
-        # And record the failing source for display
-        assert len(screen.search_notes) == 1
-        assert "linkedin" in screen.search_notes[0]
-        assert "Board search failed" in screen.search_notes[0]
+        assert any("404" in note for note in screen.search_notes)
 
 
-def test_search_dedup_empty_title_falls_back_to_id():
-    """Test that jobs with empty titles are deduplicated by job.id."""
+def test_browse_dedupes_across_sources_by_title_company():
+    """Duplicate (title, company) pairs are dropped across sources."""
     mock_config = _make_config(["indeed", "linkedin"])
 
-    mock_agent = Mock()
-    mock_job1 = _make_job("", "", job_id="job-1")
-    mock_job2 = _make_job("", "", job_id="job-2")
-    # A duplicate with same ID as job1
-    mock_job3 = _make_job("", "", job_id="job-1")
+    j1 = _make_job("Software Engineer", "Acme", job_id="a", source="indeed")
+    j2 = _make_job("Software Engineer", "Acme", job_id="b", source="linkedin")
+    j3 = _make_job("Product Manager", "Acme", job_id="c", source="indeed")
 
-    mock_agent.run_tool.side_effect = [[mock_job1, mock_job3], [mock_job2]]
+    mock_agent = Mock()
+    mock_agent.run_tool.side_effect = [[j1, j3], [j2]]
 
     with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
         screen = SearchScreen()
         screen.agent = mock_agent
 
-        jobs = screen._search("engineer")
+        jobs = screen._browse()
 
-        # job-1 and job-2 should be kept, job-3 (duplicate of job-1) dropped
         assert len(jobs) == 2
-        ids = [j.id for j in jobs]
-        assert "job-1" in ids
-        assert "job-2" in ids
+
+
+def test_dedupe_empty_title_falls_back_to_id():
+    """Jobs with empty title/company are deduplicated by job.id."""
+    screen = SearchScreen()
+
+    j1 = _make_job("", "", job_id="job-1")
+    j2 = _make_job("", "", job_id="job-2")
+    j3 = _make_job("", "", job_id="job-1")
+
+    jobs = screen._dedupe([j1, j3, j2])
+
+    assert {j.id for j in jobs} == {"job-1", "job-2"}
+
+
+def test_filter_matches_against_job_fields():
+    """Local filtering matches title/company/location/description/tags."""
+    screen = SearchScreen()
+
+    j1 = _make_job("Backend Engineer", "gitlab", location="Remote")
+    j2 = _make_job("Recruiter", "gitlab")
+    j2.tags = ["talent"]
+
+    assert screen._filter([j1, j2], "engineer") == [j1]
+    assert screen._filter([j1, j2], "gitlab") == [j1, j2]
+    assert screen._filter([j1, j2], "talent") == [j2]
+
+
+def test_render_filters_and_sets_status(monkeypatch):
+    """Typing a query narrows the results and reports the count."""
+    mock_config = _make_config(["indeed"])
+    screen = SearchScreen()
+    screen.status = None
+
+    all_jobs = [_make_job("Backend Engineer", "gitlab"), _make_job("Recruiter", "gitlab")]
+    screen.all_jobs = all_jobs
+
+    with patch('jobhunt.app.screens.search.get_user_config', return_value=mock_config):
+        monkeypatch.setattr(screen, "_set_status", lambda msg: setattr(screen, "status", msg))
+        monkeypatch.setattr(screen, "query_one", lambda *a, **k: _FakeTextArea())
+        screen._render_results("engineer")
+        assert "narrowed" in (screen.status or "").lower()
+
+        screen._render_results("")
+        assert "2 jobs found" in screen.status
+
+
+class _FakeTextArea:
+    def __init__(self):
+        self.text = ""

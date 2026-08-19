@@ -198,8 +198,13 @@ def test_dashboard_mount_renders_counts():
     asyncio.run(run())
 
 
-def test_dashboard_quick_actions_switch_screens():
+def test_dashboard_quick_actions_switch_screens(monkeypatch):
     """Dashboard quick action buttons should switch screens."""
+    # The search screen auto-browses job boards on mount; keep the test offline.
+    from jobhunt.app.screens.search import SearchScreen
+    async def _noop(*args, **kwargs):
+        return None
+    monkeypatch.setattr(SearchScreen, "_async_browse", _noop)
     
     async def run():
         app = JobHuntApp()

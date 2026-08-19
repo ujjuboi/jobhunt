@@ -79,16 +79,16 @@ def test_linkedin_block_toggles_with_sources(monkeypatch):
                 await asyncio.sleep(0.1)
                 screen = app.screen
                 # Default sources (greenhouse, lever, ashby) keep the block hidden.
-                assert screen.query_one("#linkedin_block").display == "none"
+                assert screen.query_one("#linkedin_block").display is False
                 # Typing "linkedin" into the sources input reveals it.
                 source_input = screen.query_one("#sources_input")
                 source_input.value = "greenhouse, linkedin"
                 screen.on_input_changed(type("Ev", (), {"input": source_input})())
-                assert screen.query_one("#linkedin_block").display == "block"
+                assert screen.query_one("#linkedin_block").display is True
                 # Removing it hides the block again.
                 source_input.value = "greenhouse"
                 screen.on_input_changed(type("Ev", (), {"input": source_input})())
-                assert screen.query_one("#linkedin_block").display == "none"
+                assert screen.query_one("#linkedin_block").display is False
         asyncio.run(_run())
         return app
 
@@ -120,6 +120,7 @@ def test_linkedin_login_button_flows(monkeypatch):
             screen = app.screen
             screen.query_one("#sources_input").value = "greenhouse, linkedin"
             screen._toggle_linkedin_block()
+            await asyncio.sleep(0.1)
             screen.query_one("#linkedin_email").value = "alice@example.com"
             screen.query_one("#linkedin_password").value = "secret123"
             await pilot.click("#linkedin_login_btn")

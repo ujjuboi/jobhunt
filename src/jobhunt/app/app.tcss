@@ -28,3 +28,13 @@
 #chat_messages {
     height: 1fr;
 }
+
+/* Keep the settings prompt editor compact so it never overlaps
+   the blocks above it (LinkedIn login, buttons, etc.). */
+#system_prompt {
+    height: 6;
+}
+
+#linkedin_block {
+    height: auto;
+}
