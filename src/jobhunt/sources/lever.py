@@ -17,7 +17,7 @@ class LeverAdapter(SourceAdapter):
         self.base_url = "https://api.lever.co/v0/postings"
         self.api_key = api_key
     
-    def get_jobs(self, company_slug: str, limit: int = 50) -> List[Job]:
+    def get_jobs(self, company_slug: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Get jobs from a Lever company board"""
         try:
             url = f"{self.base_url}/{company_slug}"
@@ -52,6 +52,8 @@ class LeverAdapter(SourceAdapter):
             
         except Exception as e:
             logger.warning(f"Error fetching jobs from Lever: {e}")
+            if raise_errors:
+                raise
             return []
     
     def get_job_detail(self, job_id: str) -> Optional[Job]:
@@ -61,8 +63,8 @@ class LeverAdapter(SourceAdapter):
         logger.warning("Lever job detail endpoint not implemented")
         return None
     
-    def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query"""
         # Lever doesn't support a direct search endpoint
         # We could enhance this with company-specific searches
-        return self.get_jobs(query, limit)
+        return self.get_jobs(query, limit, raise_errors=raise_errors)

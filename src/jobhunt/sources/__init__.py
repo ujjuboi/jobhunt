@@ -10,7 +10,7 @@ class SourceAdapter(ABC):
     """Abstract base class for job board adapters"""
     
     @abstractmethod
-    def get_jobs(self, company_slug: str, limit: int = 50) -> List[Job]:
+    def get_jobs(self, company_slug: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Get jobs from a specific company"""
         pass
     
@@ -20,7 +20,7 @@ class SourceAdapter(ABC):
         pass
     
     @abstractmethod
-    def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query"""
         pass
     

@@ -18,7 +18,7 @@ class GreenhouseAdapter(SourceAdapter):
         self.api_key = api_key
         self._company_slug: Optional[str] = None
     
-    def get_jobs(self, company_slug: str, limit: int = 50) -> List[Job]:
+    def get_jobs(self, company_slug: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Get jobs from a Greenhouse company board"""
         try:
             self._company_slug = company_slug
@@ -54,6 +54,8 @@ class GreenhouseAdapter(SourceAdapter):
             
         except Exception as e:
             logger.warning(f"Error fetching jobs from Greenhouse: {e}")
+            if raise_errors:
+                raise
             return []
     
     def get_job_detail(self, job_id: str) -> Optional[Job]:
@@ -85,8 +87,8 @@ class GreenhouseAdapter(SourceAdapter):
             logger.warning(f"Error fetching job detail from Greenhouse: {e}")
             return None
     
-    def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query"""
         # Greenhouse doesn't have a direct search endpoint
         # We could enhance this with company-specific searches
-        return self.get_jobs(query, limit)
+        return self.get_jobs(query, limit, raise_errors=raise_errors)

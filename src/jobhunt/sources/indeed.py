@@ -59,19 +59,19 @@ class IndeedAdapter(SourceAdapter):
         match = re.search(r"[?&]jk=([^&]+)", url)
         return match.group(1) if match else ""
 
-    def get_jobs(self, company_slug: str, limit: int = 50) -> List[Job]:
+    def get_jobs(self, company_slug: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Get jobs from an Indeed company page"""
         return self._scrape_listings(
-            f"{self.base_url}/company/{company_slug}/jobs", limit
+            f"{self.base_url}/company/{company_slug}/jobs", limit, raise_errors
         )
 
-    def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query"""
         return self._scrape_listings(
-            f"{self.base_url}/jobs?q={query}&limit={limit}", limit
+            f"{self.base_url}/jobs?q={query}&limit={limit}", limit, raise_errors
         )
 
-    def _scrape_listings(self, url: str, limit: int) -> List[Job]:
+    def _scrape_listings(self, url: str, limit: int, raise_errors: bool = False) -> List[Job]:
         """Open an Indeed results page and normalize visible job cards."""
         try:
             self._setup_browser()
@@ -116,6 +116,8 @@ class IndeedAdapter(SourceAdapter):
             return jobs
         except Exception as e:
             logger.warning(f"Error fetching jobs from Indeed: {e}")
+            if raise_errors:
+                raise
             return []
         finally:
             self._close_browser()

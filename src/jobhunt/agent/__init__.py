@@ -88,16 +88,16 @@ class ToolRegistry:
             if source.lower() == 'linkedin':
                 adapter = get_source_adapter(
                     source,
-                    email=os.environ.get('LINKEDIN_EMAIL'),
-                    password=os.environ.get('LINKEDIN_PASSWORD'),
+                    email=config.linkedin.email or os.environ.get('LINKEDIN_EMAIL'),
+                    password=config.linkedin.password or os.environ.get('LINKEDIN_PASSWORD'),
                 )
             else:
                 adapter = get_source_adapter(source)
 
             if company:
-                jobs = adapter.get_jobs(company, limit)
+                jobs = adapter.get_jobs(company, limit, raise_errors=raise_errors)
             else:
-                jobs = adapter.search_jobs(query, limit)
+                jobs = adapter.search_jobs(query, limit, raise_errors=raise_errors)
 
             # Deduplicate jobs
             jobs = self._dedupe_jobs(jobs)

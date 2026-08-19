@@ -1,0 +1,62 @@
+{
+  "name": "Ujjwal Verma",
+  "email": "ujjwalv99@protonmail.com",
+  "phone": "110076",
+  "summary": "",
+  "experience": [
+    {
+      "title": "Experience",
+      "content": "Github Agentic Workflows, LangChain, LangGraph, Microservice, Modular Monolith, Figma MCP Developed, tested, and documented features for a large-scale enterprise onboarding and governance platform. Designed migration roadmap from modular monolith to microservices architecture by defining bounded contexts and service communication patterns. Built AI-powered GitHub Agentic Workflows using GitHub Actions, markdown-defined workflows, gh aw CLI, and GitHub Copilot / Claude / Codex engines for autonomous pull request automation with secure guardrails Implemented Grumpy Code Reviewer using tools.github (pull_requests, repos) and LLM agents to review PRs, detect maintainability issues, and improve code review turnaround time Added intelligent lint-check workflows using bash tools, repository context tools, and PR triggers to validate coding standards, detect formatting issues, and prevent unnecessary code changes before merge Created automated jobs to generate PR descriptions from linked issues using GitHub issues + pull_requests toolsets, contextual summarization agents, and safe outputs Built Continuous AI workflows to automatically update Confluence documentation using web-fetch / web-search tools, external integrations, and scheduled GitHub Actions pipelines Developed AI-assisted Playwright regression test generation workflows using playwright tools, issue context, PR metadata, and browser automation for release validation Built both high-code and low-code AI agents using LangChain, integrating prompt chains, tool-calling flows, retrieval pipelines, and enterprise automation use cases. Configured PR-triggered CI/CD pipelines so all review, documentation, testing, and quality workflows executed automatically on pull request creation through compiled .lock.yml GitHub workflows Contributed reusable backend components and scalable engineering practices for enterprise systems Led UI modernization initiatives with cross-functional teams to improve product usability and adoption using Figma MCP Participated in peer reviews, engineering audits, and production-quality coding standards. NextJS, ExpressJS, MongoDB, Redis, Git Adapted to a new technology stack (Next.js, ExpressJS, MongoDB, Redis) and software development lifecycle, contributing to bug fixes, feature implementation, and peer code reviews",
+      "bullets": [
+        "Github Agentic Workflows, LangChain, LangGraph, Microservice, Modular Monolith, Figma MCP",
+        "Developed, tested, and documented features for a large-scale enterprise onboarding and governance platform.",
+        "Designed migration roadmap from modular monolith to microservices architecture by defining bounded contexts and service communication patterns.",
+        "Built AI-powered GitHub Agentic Workflows using GitHub Actions, markdown-defined workflows, gh aw CLI, and GitHub Copilot / Claude / Codex engines for autonomous pull request automation with secure guardrails",
+        "Implemented Grumpy Code Reviewer using tools.github (pull_requests, repos) and LLM agents to review PRs, detect maintainability issues, and improve code review turnaround time",
+        "Added intelligent lint-check workflows using bash tools, repository context tools, and PR triggers to validate coding standards, detect formatting issues, and prevent unnecessary code changes before merge",
+        "Created automated jobs to generate PR descriptions from linked issues using GitHub issues + pull_requests toolsets, contextual summarization agents, and safe outputs",
+        "Built Continuous AI workflows to automatically update Confluence documentation using web-fetch / web-search tools, external integrations, and scheduled GitHub Actions pipelines",
+        "Developed AI-assisted Playwright regression test generation workflows using playwright tools, issue context, PR metadata, and browser automation for release validation",
+        "Built both high-code and low-code AI agents using LangChain, integrating prompt chains, tool-calling flows, retrieval pipelines, and enterprise automation use cases.",
+        "Configured PR-triggered CI/CD pipelines so all review, documentation, testing, and quality workflows executed automatically on pull request creation through compiled .lock.yml GitHub workflows",
+        "Contributed reusable backend components and scalable engineering practices for enterprise systems",
+        "Led UI modernization initiatives with cross-functional teams to improve product usability and adoption using Figma MCP",
+        "Participated in peer reviews, engineering audits, and production-quality coding standards.",
+        "NextJS, ExpressJS, MongoDB, Redis, Git",
+        "Adapted to a new technology stack (Next.js, ExpressJS, MongoDB, Redis) and software development lifecycle, contributing to bug fixes, feature implementation, and peer code reviews"
+      ]
+    },
+    {
+      "title": "Experience",
+      "content": "NextJS, SpringBoot, MongoDB, Git, AWS, Active Directory, Microsoft Entra ID Working as a full stack developer on a large-scale identity data analytics tool - Deloitte Directory & Privileged Accelerator (DDPX), involving design, development, testing, and documentation. Designed and implemented role based access control (RBAC) in Java for monolithic application, creating a whitelist of APIs and blocking all by default using multi-tenant handler in SpringBoot Setting up SAML external Identity Provider like Okta, OAuth, AWS Cognito and Microsoft Azure Graph to make the tool more accessible Researched offerings like Wiz and SkyArk to build a PoC integrating AWS IAM data using AWS SDK for Java, extending tool capabilities Developed diverse analytics use cases by correlating identity sources such as Active Directory, Microsoft Entra ID, and AWS IAM through MongoDB queries Built visual graph-based analytics with React Flow and ChartJS to find security vulnerabilities in the identity data like groups with no owner, inactive service accounts, circular nested groups, unidentified users Optimized dynamic data presentation in Next.js using dynamic routing and API payload tuning; reduced data load time by 50% with Bootstrap Table pagination and enabled real-time graph updates via the useSWR hook Displaying data for each use case using dynamic routing in NextJS, reduced data load time by 50% by using pagination in Bootstrap Table and modifying payload in API, updating graph in real time with useSWR hook Created algorithms for ownership attribution in privileged entities with 95% accuracy, blending deterministic methods (e.g., reporting hierarchy, admin rank scoring) and Llama-powered probabilistic approaches Directed client engagements involving analysis of 100,000+ records across multiple domains, uncovering vulnerabilities and flagging 80% of the data , presenting findings in distinct reports created with OpenCSV in Java, preparing remediation plans and consulting on how to implement them Spacy 3, NLTK, Hadoop, PySpark, Tableau, GCP Vertex AI, Numpy, Pandas Developed an AI agent using machine learning (Spacy3, NLTK) to identify potential owners of IAM principals based on description and info attributes. Deloitte AI Academy Certified \u2013 8-week bootcamp covering Hadoop, PySpark, Tableau, GCP Vertex AI, NumPy, and Pandas",
+      "bullets": [
+        "NextJS, SpringBoot, MongoDB, Git, AWS, Active Directory, Microsoft Entra ID",
+        "Working as a full stack developer on a large-scale identity data analytics tool - Deloitte Directory & Privileged Accelerator (DDPX), involving design, development, testing, and documentation.",
+        "Designed and implemented role based access control (RBAC) in Java for monolithic application, creating a whitelist of APIs and blocking all by default using multi-tenant handler in SpringBoot",
+        "Setting up SAML external Identity Provider like Okta, OAuth, AWS Cognito and Microsoft Azure Graph to make the tool more accessible",
+        "Researched offerings like Wiz and SkyArk to build a PoC integrating AWS IAM data using AWS SDK for Java, extending tool capabilities",
+        "Developed diverse analytics use cases by correlating identity sources such as Active Directory, Microsoft Entra ID, and AWS IAM through MongoDB queries",
+        "Built visual graph-based analytics with React Flow and ChartJS to find security vulnerabilities in the identity data like groups with no owner, inactive service accounts, circular nested groups, unidentified users",
+        "Optimized dynamic data presentation in Next.js using dynamic routing and API payload tuning; reduced data load time by 50% with Bootstrap Table pagination and enabled real-time graph updates via the useSWR hook",
+        "Displaying data for each use case using dynamic routing in NextJS, reduced data load time by 50% by using pagination in Bootstrap Table and modifying payload in API, updating graph in real time with useSWR hook",
+        "Created algorithms for ownership attribution in privileged entities with 95% accuracy, blending deterministic methods (e.g., reporting hierarchy, admin rank scoring) and Llama-powered probabilistic approaches",
+        "Directed client engagements involving analysis of 100,000+ records across multiple domains, uncovering vulnerabilities and flagging 80% of the data , presenting findings in distinct reports created with OpenCSV in Java, preparing remediation plans and consulting on how to implement them",
+        "Spacy 3, NLTK, Hadoop, PySpark, Tableau, GCP Vertex AI, Numpy, Pandas",
+        "Developed an AI agent using machine learning (Spacy3, NLTK) to identify potential owners of IAM principals based on description and info attributes.",
+        "Deloitte AI Academy Certified \u2013 8-week bootcamp covering Hadoop, PySpark, Tableau, GCP Vertex AI, NumPy, and Pandas"
+      ]
+    }
+  ],
+  "education": [],
+  "skills": [],
+  "certifications": [],
+  "projects": [
+    {
+      "title": "Projects",
+      "content": "Built a real-time dashboard with 0.3ms downtime to display remote sensor data using MQTT, WebSockets - Pub/Sub, and Django.",
+      "bullets": [
+        "Built a real-time dashboard with 0.3ms downtime to display remote sensor data using MQTT, WebSockets - Pub/Sub, and Django."
+      ]
+    }
+  ]
+}

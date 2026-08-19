@@ -17,7 +17,7 @@ class AshbyAdapter(SourceAdapter):
         self.base_url = "https://api.ashbyhq.com/posting-api/job-board"
         self.api_key = api_key
     
-    def get_jobs(self, company_slug: str, limit: int = 50) -> List[Job]:
+    def get_jobs(self, company_slug: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Get jobs from an Ashby company board"""
         try:
             url = f"{self.base_url}/{company_slug}"
@@ -50,6 +50,8 @@ class AshbyAdapter(SourceAdapter):
             
         except Exception as e:
             logger.warning(f"Error fetching jobs from Ashby: {e}")
+            if raise_errors:
+                raise
             return []
     
     def get_job_detail(self, job_id: str) -> Optional[Job]:
@@ -58,8 +60,8 @@ class AshbyAdapter(SourceAdapter):
         logger.warning("Ashby job detail endpoint not implemented")
         return None
     
-    def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query"""
         # Ashby typically requires specifying the company slug
         # We're implementing a simplified version
-        return self.get_jobs(query, limit)
+        return self.get_jobs(query, limit, raise_errors=raise_errors)

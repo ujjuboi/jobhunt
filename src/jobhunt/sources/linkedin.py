@@ -41,19 +41,53 @@ class LinkedInAdapter(SourceAdapter):
             else str(CACHE_DIR / "linkedin_session.json")
         )
 
-    def _setup_browser(self):
+    def _setup_browser(self, headless: Optional[bool] = None, auto_login: bool = True):
         """Initialize the browser, restoring a persisted session if present."""
         if self.browser:
             return
         self.playwright = sync_playwright().start()
         has_session = os.path.exists(self.session_file)
-        self.browser = self.playwright.chromium.launch(headless=has_session)
+        if headless is None:
+            headless = has_session
+        self.browser = self.playwright.chromium.launch(headless=headless)
         self.context = self.browser.new_context(
             storage_state=self.session_file if has_session else None
         )
         self.page = self.context.new_page()
-        if not has_session and self.email and self.password:
+        if auto_login and not has_session and self.email and self.password:
             self._login()
+
+    def login(self, email: str = "", password: str = "") -> bool:
+        """Perform a one-time interactive LinkedIn login.
+
+        Launches a headful browser, pre-fills the given credentials when
+        provided, and waits for the user to finish any verification step
+        (including 2FA). The signed-in session is persisted to the local
+        cache so later runs reuse it headlessly. Returns True on success and
+        raises on failure.
+        """
+        if email:
+            self.email = email
+        if password:
+            self.password = password
+        try:
+            self._setup_browser(headless=False, auto_login=False)
+            self.page.goto(f"{self.base_url}/login")
+            if self.email:
+                self.page.fill("#username", self.email)
+            if self.password:
+                self.page.fill("#password", self.password)
+            self.page.click("button[type='submit']")
+            # Wait for the user (and any 2FA/verify step) to finish signing in.
+            self.page.wait_for_url("**/feed/**", timeout=120000)
+            Path(self.session_file).parent.mkdir(parents=True, exist_ok=True)
+            self.context.storage_state(path=self.session_file)
+            return True
+        except Exception as e:
+            logger.warning(f"LinkedIn login failed: {e}")
+            raise
+        finally:
+            self._close_browser()
 
     def _login(self):
         """Headful login; persists the session cookie jar for later reuse."""
@@ -86,19 +120,19 @@ class LinkedInAdapter(SourceAdapter):
             return match.group(1)
         return url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
 
-    def get_jobs(self, company_slug: str, limit: int = 50) -> List[Job]:
+    def get_jobs(self, company_slug: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Get jobs from a LinkedIn company page"""
         return self._scrape_listings(
-            f"{self.base_url}/company/{company_slug}/jobs/", limit
+            f"{self.base_url}/company/{company_slug}/jobs/", limit, raise_errors
         )
 
-    def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
+    def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:
         """Search for jobs using a query"""
         return self._scrape_listings(
-            f"{self.base_url}/jobs/search/?keywords={query}", limit
+            f"{self.base_url}/jobs/search/?keywords={query}", limit, raise_errors
         )
 
-    def _scrape_listings(self, url: str, limit: int) -> List[Job]:
+    def _scrape_listings(self, url: str, limit: int, raise_errors: bool = False) -> List[Job]:
         """Open a LinkedIn listings page and normalize visible job cards."""
         try:
             self._setup_browser()
@@ -143,6 +177,8 @@ class LinkedInAdapter(SourceAdapter):
             return jobs
         except Exception as e:
             logger.warning(f"Error fetching jobs from LinkedIn: {e}")
+            if raise_errors:
+                raise
             return []
         finally:
             self._close_browser()

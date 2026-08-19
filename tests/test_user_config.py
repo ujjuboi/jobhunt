@@ -45,6 +45,8 @@ def test_save_load_round_trip(tmp_path):
     config.model.chat = "custom-model"
     config.scoring.mode = "llm"
     config.prompts.system = "You are a resume expert."
+    config.linkedin.email = "alice@example.com"
+    config.linkedin.password = "hunter2"
     saved = save_user_config(config, str(path))
     assert saved == path
     assert path.exists()
@@ -55,6 +57,14 @@ def test_save_load_round_trip(tmp_path):
     assert reloaded.model.chat == "custom-model"
     assert reloaded.scoring.mode == "llm"
     assert reloaded.prompts.system == "You are a resume expert."
+    assert reloaded.linkedin.email == "alice@example.com"
+    assert reloaded.linkedin.password == "hunter2"
+
+
+def test_linkedin_default_credentials_are_empty():
+    config = get_default_user_config()
+    assert config.linkedin.email == ""
+    assert config.linkedin.password == ""
 
 
 def test_invalid_sources_and_mode_are_pruned(tmp_path):

@@ -21,6 +21,16 @@ logger = logging.getLogger("jobhunt.config")
 ALLOWED_SOURCES = ("greenhouse", "lever", "ashby", "linkedin", "indeed")
 ALLOWED_SCORING_MODES = ("hybrid", "embedding", "llm")
 
+# Sources that support native keyword search (free-text queries).
+# Greenhouse/Lever/Ashby only expose per-company boards; site-wide
+# keyword search is not available on those platforms.
+KEYWORD_SOURCES = ("indeed", "linkedin")
+
+
+def keyword_search_available() -> bool:
+    """Return True if at least one keyword-search source is enabled."""
+    return any(s.lower() in KEYWORD_SOURCES for s in get_user_config().sources.enabled)
+
 
 class SourceConfig(BaseModel):
     """Which sources are enabled and which company slugs to track per source."""
@@ -51,6 +61,16 @@ class ScoringConfig(BaseModel):
     mode: str = "hybrid"
 
 
+class LinkedInConfig(BaseModel):
+    """LinkedIn credentials used for the one-time browser login.
+
+    Stored as-is in the user config (env LINKEDIN_EMAIL / LINKEDIN_PASSWORD
+    remain as an override / fallback).
+    """
+    email: str = ""
+    password: str = ""
+
+
 class UserConfig(BaseModel):
     """Validated user configuration.
 
@@ -60,6 +80,7 @@ class UserConfig(BaseModel):
     prompts: PromptConfig = Field(default_factory=PromptConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    linkedin: LinkedInConfig = Field(default_factory=LinkedInConfig)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -163,6 +184,11 @@ def _to_toml(config: UserConfig) -> str:
     lines.append("")
     lines.append("[scoring]")
     lines.append(f'mode = {_quote(config.scoring.mode)}')
+
+    lines.append("")
+    lines.append("[linkedin]")
+    lines.append(f'email = {_quote(config.linkedin.email)}')
+    lines.append(f'password = {_quote(config.linkedin.password)}')
 
     return "\n".join(lines) + "\n"
 

@@ -5,6 +5,8 @@ from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Button
 from textual.containers import Container, Horizontal
 
+from ...config.user_config import keyword_search_available
+
 
 class BaseScreen(Screen):
     """Base screen class with common layout"""
@@ -26,13 +28,14 @@ class BaseScreen(Screen):
     def compose(self):
         """Create the screen layout"""
         yield Header()
-        yield Horizontal(
-            *[
-                Button(label, id=button_id)
-                for button_id, screen, label in self.NAV_BUTTONS
-            ],
-            id="nav_bar"
-        )
+
+        nav_buttons = [
+            Button(label, id=button_id)
+            for button_id, screen, label in self.NAV_BUTTONS
+            if screen != "search" or keyword_search_available()
+        ]
+
+        yield Horizontal(*nav_buttons, id="nav_bar")
         yield Container(
             Static(f"JobHunt - {self.screen_name.title()} Screen", id="screen_title"),
             self._get_content(),

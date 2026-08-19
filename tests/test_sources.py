@@ -157,6 +157,91 @@ def test_linkedin_extracts_job_id():
     assert adapter._extract_job_id("") == ""
 
 
+def _FakePlaywright(behavior):
+    """Return a sync_playwright stand-in that records the login interaction."""
+    class FakePage:
+        def goto(self, url):
+            behavior["goto_url"] = url
+
+        def fill(self, selector, value):
+            behavior["fills"].append((selector, value))
+
+        def click(self, selector):
+            behavior["clicked"] = selector
+
+        def wait_for_url(self, pattern, timeout=None):
+            behavior["waited"] = (pattern, timeout)
+
+    class FakeContext:
+        def new_page(self):
+            return FakePage()
+
+        def storage_state(self, path=None):
+            behavior["saved_state_path"] = path
+
+    class FakeBrowser:
+        def __init__(self, headless):
+            behavior["headless"] = headless
+
+        def new_context(self, storage_state=None):
+            behavior["restored_state"] = storage_state
+            return FakeContext()
+
+        def close(self):
+            behavior["closed"] = True
+
+    class FakeChromium:
+        def launch(self, **kwargs):
+            return FakeBrowser(kwargs.get("headless"))
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        def stop(self):
+            behavior["stopped"] = True
+
+    class FakeManager:
+        def start(self):
+            return FakePlaywright()
+
+    return FakeManager()
+
+
+def test_linkedin_adapter_login_persists_session(monkeypatch, tmp_path):
+    import jobhunt.sources.linkedin as linkedin_module
+
+    behavior = {"fills": []}
+    monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: _FakePlaywright(behavior))
+    session = str(tmp_path / "linkedin_session.json")
+
+    adapter = LinkedInAdapter(email="", password="", session_file=session)
+    assert adapter.login(email="a@b.c", password="secret") is True
+
+    assert behavior["headless"] is False
+    assert behavior["goto_url"] == "https://www.linkedin.com/login"
+    assert ("#username", "a@b.c") in behavior["fills"]
+    assert ("#password", "secret") in behavior["fills"]
+    assert behavior["clicked"] == "button[type='submit']"
+    assert behavior["waited"] == ("**/feed/**", 120000)
+    assert behavior["saved_state_path"] == session
+    assert behavior["closed"] is True
+    assert behavior["stopped"] is True
+
+
+def test_linkedin_adapter_login_skips_empty_credentials(monkeypatch, tmp_path):
+    import jobhunt.sources.linkedin as linkedin_module
+
+    behavior = {"fills": []}
+    monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: _FakePlaywright(behavior))
+    session = str(tmp_path / "linkedin_session.json")
+
+    adapter = LinkedInAdapter(email="", password="", session_file=session)
+    assert adapter.login() is True
+
+    assert behavior["fills"] == []
+
+
 def test_indeed_extracts_job_id():
     """Indeed ids are the jk query param, not the last path segment."""
     adapter = IndeedAdapter()

@@ -1,6 +1,8 @@
 """
 Settings screen for JobHunt application
 """
+import asyncio
+
 from textual.widgets import Static, Input, Button, Select, TextArea
 from textual.containers import Container, Vertical
 
@@ -50,6 +52,16 @@ class SettingsScreen(BaseScreen):
                 id="app_settings_block",
             ),
             Vertical(
+                Static("LinkedIn login:", classes="section_title"),
+                Static("Email (LINKEDIN_EMAIL):"),
+                Input(placeholder="you@example.com", id="linkedin_email"),
+                Static("Password (LINKEDIN_PASSWORD):"),
+                Input(placeholder="secret", id="linkedin_password", password=True),
+                Button("Login to LinkedIn", id="linkedin_login_btn"),
+                Static("", id="linkedin_status"),
+                id="linkedin_block",
+            ),
+            Vertical(
                 Static("System prompt (shown on the Chat screen):", classes="section_title"),
                 TextArea(id="system_prompt", show_line_numbers=False),
                 id="prompt_block",
@@ -76,11 +88,58 @@ class SettingsScreen(BaseScreen):
         self.query_one("#model_input", Input).value = config.model.chat
         self.query_one("#score_mode_select", Select).value = config.scoring.mode
         self.query_one("#system_prompt", TextArea).text = config.prompts.system
+        self.query_one("#linkedin_email", Input).value = config.linkedin.email
+        self.query_one("#linkedin_password", Input).value = config.linkedin.password
+        self._toggle_linkedin_block()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Show/hide the LinkedIn login block based on the enabled sources."""
+        if event.input.id == "sources_input":
+            self._toggle_linkedin_block()
+
+    def _toggle_linkedin_block(self) -> None:
+        """Display the LinkedIn login block only when linkedin is a source."""
+        sources_val = self.query_one("#sources_input", Input).value.lower()
+        show = "linkedin" in sources_val
+        self.query_one("#linkedin_block").display = "block" if show else "none"
+        if not show:
+            self.query_one("#linkedin_status", Static).update("")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         super().on_button_pressed(event)
         if event.button.id == "save_config_btn":
             self._save_config()
+        elif event.button.id == "linkedin_login_btn":
+            self._login_linkedin()
+
+    def _login_linkedin(self) -> None:
+        """Kick off a one-time LinkedIn login in the background."""
+        # Persist credentials before launching so they survive an aborted login.
+        self._save_config()
+        status = self.query_one("#linkedin_status", Static)
+        status.update("Launching browser for LinkedIn login...")
+        self.query_one("#linkedin_login_btn", Button).disabled = True
+        self.run_worker(self._async_linkedin_login, group="linkedin", exclusive=True)
+
+    async def _async_linkedin_login(self) -> None:
+        status = self.query_one("#linkedin_status", Static)
+        try:
+            email = self.query_one("#linkedin_email", Input).value.strip()
+            password = self.query_one("#linkedin_password", Input).value
+            await asyncio.to_thread(self._linkedin_login_blocking, email, password)
+            status.update("LinkedIn logged in. Session saved for headless reuse.")
+        except Exception as e:
+            status.update(f"LinkedIn login failed: {e}")
+        finally:
+            self.query_one("#linkedin_login_btn", Button).disabled = False
+
+    def _linkedin_login_blocking(self, email: str, password: str) -> bool:
+        """Blocking Playwright login, run off the event loop."""
+        from ...sources.linkedin import LinkedInAdapter
+
+        adapter = LinkedInAdapter(email=email, password=password)
+        adapter.login(email=email, password=password)
+        return True
 
     def _save_config(self) -> None:
         status = self.query_one("#settings_status", Static)
@@ -124,6 +183,8 @@ class SettingsScreen(BaseScreen):
             config.model.chat = model
         config.scoring.mode = mode
         config.prompts.system = system_prompt
+        config.linkedin.email = self.query_one("#linkedin_email", Input).value.strip()
+        config.linkedin.password = self.query_one("#linkedin_password", Input).value
 
         try:
             path = save_user_config(config)
