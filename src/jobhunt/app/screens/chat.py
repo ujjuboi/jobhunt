@@ -9,6 +9,7 @@ from textual.containers import Container
 
 from .base import BaseScreen
 from ...agent import JobHuntAgent
+from ...config import get_user_config
 from ...db import JobHuntDB
 
 
@@ -20,7 +21,7 @@ class ChatScreen(BaseScreen):
         self.db = db
         self.agent: JobHuntAgent | None = None
         self.messages: List[Dict[str, str]] = [
-            {"role": "system", "content": "You are a helpful job-hunting assistant."}
+            {"role": "system", "content": get_user_config().prompts.system}
         ]
         self.transcript = ""
 
@@ -59,17 +60,86 @@ class ChatScreen(BaseScreen):
             for worker in self.workers
         )
 
-    async def _ask_agent(self) -> None:
-        try:
-            if self.agent is None:
-                self.agent = JobHuntAgent(self.db)
-            reply = await asyncio.to_thread(self.agent.chat, list(self.messages))
-        except Exception as e:
-            reply = f"[red]Error:[/] {e}"
-        self.messages.append({"role": "assistant", "content": reply})
-        self._append_transcript(f"[green]Agent:[/] {reply}\n")
-
     def _append_transcript(self, text: str) -> None:
         self.transcript += text
         text_area = self.query_one("#chat_messages", TextArea)
         text_area.text = self.transcript
+
+    def _start_streaming_line(self) -> int:
+        """Mark the start of the streaming reply line, replacing 'Thinking...'."""
+        thinking = "[dim]Thinking...[/]\n"
+        if self.transcript.endswith(thinking):
+            self.transcript = self.transcript[: -len(thinking)] + "[green]Agent:[/] "
+        else:
+            self.transcript += "[green]Agent:[/] "
+        return len(self.transcript)
+
+    def _streaming_line(self, start: int, text: str) -> None:
+        """Append streamed text onto the agent line, keeping the prefix intact."""
+        self.transcript = self.transcript[:start] + text
+        text_area = self.query_one("#chat_messages", TextArea)
+        text_area.text = self.transcript
+
+    def _finish_streaming_line(self) -> None:
+        """Add the newline after a completed streamed reply."""
+        if not self.transcript.endswith("\n"):
+            self.transcript += "\n"
+        text_area = self.query_one("#chat_messages", TextArea)
+        text_area.text = self.transcript
+
+    async def _ask_agent(self) -> None:
+        try:
+            if self.agent is None:
+                self.agent = JobHuntAgent(self.db)
+            if hasattr(self.agent, "chat_stream"):
+                await self._ask_agent_streaming()
+            else:
+                reply = await asyncio.to_thread(self.agent.chat, list(self.messages))
+                self.messages.append({"role": "assistant", "content": reply})
+                self._append_transcript(f"[green]Agent:[/] {reply}\n")
+        except Exception as e:
+            # Log error but don't append the error text to conversation history
+            logger.warning("Agent chat failed: %s", e, exc_info=True)
+            reply = f"[red]Error:[/] {e}"
+            # Instead of appending the error text, we append a marker so it doesn't burden context
+            self.messages.append({"role": "assistant", "content": "[error: see logs]"})
+            self._append_transcript(f"{reply}\n")
+
+    async def _ask_agent_streaming(self) -> None:
+        """Stream the agent reply, updating the transcript as chunks arrive."""
+        queue: "asyncio.Queue[str | tuple[str, str] | None]" = asyncio.Queue()
+        start = self._start_streaming_line()
+        reply_parts: List[str] = []
+        error: str | None = None
+
+        def _produce():
+            nonlocal error
+            try:
+                for chunk in self.agent.chat_stream(list(self.messages)):
+                    queue.put_nowait(chunk)
+            except Exception as e:
+                error = str(e)
+                logger.warning("Agent streaming failed: %s", e, exc_info=True)
+                queue.put_nowait(("error", "[error: see logs]"))
+            finally:
+                queue.put_nowait(None)
+
+        self.run_worker(asyncio.to_thread(_produce), group="chat_stream", exclusive=True)
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            if isinstance(item, tuple):
+                if item[0] == "error":
+                    self._streaming_line(start, f"[red]Error:[/] {item[1]}")
+                continue
+            reply_parts.append(item)
+            self._streaming_line(start, "".join(reply_parts))
+
+        if error:
+            self.messages.append({"role": "assistant", "content": error})
+            self._append_transcript("\n")
+        else:
+            self.messages.append({"role": "assistant", "content": "".join(reply_parts)})
+            self._finish_streaming_line()

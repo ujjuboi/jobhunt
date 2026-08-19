@@ -1,10 +1,13 @@
 """
 Greenhouse job board adapter
 """
+import logging
 from typing import List, Optional
 from ..models import Job
 from ..sources import SourceAdapter
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class GreenhouseAdapter(SourceAdapter):
@@ -50,7 +53,7 @@ class GreenhouseAdapter(SourceAdapter):
             return jobs
             
         except Exception as e:
-            print(f"Error fetching jobs from Greenhouse: {e}")
+            logger.warning(f"Error fetching jobs from Greenhouse: {e}")
             return []
     
     def get_job_detail(self, job_id: str) -> Optional[Job]:
@@ -79,7 +82,7 @@ class GreenhouseAdapter(SourceAdapter):
             return job
             
         except Exception as e:
-            print(f"Error fetching job detail from Greenhouse: {e}")
+            logger.warning(f"Error fetching job detail from Greenhouse: {e}")
             return None
     
     def search_jobs(self, query: str, limit: int = 50) -> List[Job]:

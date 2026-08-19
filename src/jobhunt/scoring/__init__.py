@@ -5,13 +5,18 @@ Hybrid mode: embedding (semantic) stage over all jobs, then an LLM confirm
 stage over the top candidates. Also supports embedding-only and LLM-only
 modes via `scoring.mode` (see config.get_scoring_mode).
 """
+import logging
+import os
 import re
 from typing import List, Dict, Optional
 
-from ..config import get_scoring_mode
+from ..config import get_scoring_mode, get_user_config
 from ..db import JobHuntDB
 from ..embeddings import EmbeddingClient
 from ..models import Job, Profile, FitScore
+from ..llm import DEFAULT_CHAT_MODEL
+
+logger = logging.getLogger(__name__)
 
 DEDUPE_THRESHOLD = 0.95
 LLM_CONFIRM_TOP_N = 15
@@ -102,31 +107,50 @@ class ScorePipeline:
         """Score a job via the LLM using a strict JSON response."""
         if self.agent is None:
             return None
-        prompt = (
-            "Score how well this candidate profile fits this job posting. "
+        config = get_user_config()
+        score_prompt = config.prompts.score or (
+            'Score how well this candidate profile fits this job posting. '
             'Respond with JSON only, using keys: "score" (0.0 to 1.0), '
             '"explanation" (short reason), "matched_skills" (list), '
-            '"missing_skills" (list), "suggested_bullets" (list).\n\n'
+            '"missing_skills" (list), "suggested_bullets" (list).'
+        )
+        prompt = (
+            f"{score_prompt}\n\n"
             f"JOB:\n{self._job_text(job)[:2000]}\n\n"
             f"PROFILE:\n{self._profile_text(profile)[:2000]}"
         )
+        # Check for environment variable override
+        confirm_model = os.environ.get("JOBHUNT_CONFIRM_MODEL")
+        if not confirm_model:
+            # Fall back to config
+            confirm_model = config.model.confirm
+        # Only ask for a specific model when the user configured one explicitly;
+        # otherwise let the agent use its own default.
+        kwargs = {}
+        if confirm_model and confirm_model != DEFAULT_CHAT_MODEL:
+            kwargs["model"] = confirm_model
         try:
             data = self.agent.chat_with_agent(
                 [
                     {"role": "system", "content": "You are a job-fit analyzer returning strict JSON."},
                     {"role": "user", "content": prompt},
-                ]
+                ],
+                **kwargs,
             )
+            raw_score = float(data.get("score", 0.0))
+            # Models sometimes return 0-100 instead of 0-1; normalize.
+            score = raw_score / 100.0 if raw_score > 1.0 else raw_score
+            score = max(0.0, min(1.0, score))
             return FitScore(
                 job_id=job.id,
-                score=float(data.get("score", 0.0)),
+                score=score,
                 explanation=str(data.get("explanation", "")),
                 matched_skills=list(data.get("matched_skills", [])),
                 missing_skills=list(data.get("missing_skills", [])),
                 suggested_bullets=list(data.get("suggested_bullets", [])),
             )
         except Exception as e:
-            print(f"LLM fit confirm failed for {job.id}: {e}")
+            logger.warning("LLM fit confirm failed for %s: %s", job.id, e, exc_info=True)
             return None
 
     @staticmethod

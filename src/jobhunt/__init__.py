@@ -7,7 +7,7 @@ from .db import JobHuntDB
 
 # Global instances
 jobhunt_app = None
-db = None
+db = JobHuntDB()
 
 def init_app():
     """Initialize the JobHunt application and database"""

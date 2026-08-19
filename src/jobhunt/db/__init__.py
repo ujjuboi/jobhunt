@@ -2,12 +2,15 @@
 Database layer for JobHunt
 Uses SQLite for storing jobs, applications, and embeddings
 """
+import logging
 import sqlite3
 import os
 from datetime import datetime
 from typing import List, Optional
 import numpy as np
 from ..models import Job, Application, Profile, Resume
+
+logger = logging.getLogger(__name__)
 
 
 class JobHuntDB:
@@ -126,7 +129,7 @@ class JobHuntDB:
                 conn.commit()
             return True
         except Exception as e:
-            print(f"Error saving job: {e}")
+            logger.warning(f"Error saving job: {e}")
             return False
     
     def get_job(self, job_id: str) -> Optional[Job]:
@@ -154,7 +157,7 @@ class JobHuntDB:
                     )
             return None
         except Exception as e:
-            print(f"Error getting job: {e}")
+            logger.warning(f"Error getting job: {e}")
             return None
     
     def get_jobs(self, limit: int = 50, offset: int = 0) -> List[Job]:
@@ -187,7 +190,7 @@ class JobHuntDB:
                     ))
                 return jobs
         except Exception as e:
-            print(f"Error getting jobs: {e}")
+            logger.warning(f"Error getting jobs: {e}")
             return []
     
     def save_application(self, application: Application) -> bool:
@@ -210,7 +213,7 @@ class JobHuntDB:
                 conn.commit()
             return True
         except Exception as e:
-            print(f"Error saving application: {e}")
+            logger.warning(f"Error saving application: {e}")
             return False
     
     def get_application(self, job_id: str) -> Optional[Application]:
@@ -231,7 +234,7 @@ class JobHuntDB:
                     )
             return None
         except Exception as e:
-            print(f"Error getting application: {e}")
+            logger.warning(f"Error getting application: {e}")
             return None
     
     def save_embedding(self, kind: str, entity_id: str, embedding: List[float]) -> bool:
@@ -249,7 +252,7 @@ class JobHuntDB:
                 conn.commit()
             return True
         except Exception as e:
-            print(f"Error saving embedding: {e}")
+            logger.warning(f"Error saving embedding: {e}")
             return False
     
     def get_embedding(self, kind: str, entity_id: str) -> Optional[List[float]]:
@@ -264,7 +267,7 @@ class JobHuntDB:
                     return json.loads(row[0])
             return None
         except Exception as e:
-            print(f"Error getting embedding: {e}")
+            logger.warning(f"Error getting embedding: {e}")
             return None
     
     def cosine_similarity(self, vec_a: List[float], vec_b: List[float]) -> float:
@@ -284,7 +287,7 @@ class JobHuntDB:
                 
             return dot_product / (norm_a * norm_b)
         except Exception as e:
-            print(f"Error calculating cosine similarity: {e}")
+            logger.warning(f"Error calculating cosine similarity: {e}")
             return 0.0
     
     def get_job_embeddings(self) -> List[tuple]:
@@ -298,7 +301,7 @@ class JobHuntDB:
                 # Convert JSON strings back to lists
                 return [(row[0], json.loads(row[1])) for row in rows]
         except Exception as e:
-            print(f"Error getting job embeddings: {e}")
+            logger.warning(f"Error getting job embeddings: {e}")
             return []
     
     def get_profile_embedding(self) -> Optional[List[float]]:
@@ -313,7 +316,7 @@ class JobHuntDB:
                     return json.loads(row[0])
             return None
         except Exception as e:
-            print(f"Error getting profile embedding: {e}")
+            logger.warning(f"Error getting profile embedding: {e}")
             return None
     
     def save_profile(self, profile: Profile) -> bool:
@@ -341,7 +344,7 @@ class JobHuntDB:
                 conn.commit()
             return True
         except Exception as e:
-            print(f"Error saving profile: {e}")
+            logger.warning(f"Error saving profile: {e}")
             return False
     
     def get_profile(self, profile_id: str = None) -> Optional[Profile]:
@@ -369,7 +372,7 @@ class JobHuntDB:
                     )
             return None
         except Exception as e:
-            print(f"Error getting profile: {e}")
+            logger.warning(f"Error getting profile: {e}")
             return None
     
     def save_resume(self, resume: Resume) -> bool:
@@ -391,7 +394,7 @@ class JobHuntDB:
                 conn.commit()
             return True
         except Exception as e:
-            print(f"Error saving resume: {e}")
+            logger.warning(f"Error saving resume: {e}")
             return False
     
     def get_resume(self, resume_id: str) -> Optional[Resume]:
@@ -411,5 +414,29 @@ class JobHuntDB:
                     )
             return None
         except Exception as e:
-            print(f"Error getting resume: {e}")
+            logger.warning(f"Error getting resume: {e}")
             return None
+    
+    def count_jobs(self) -> int:
+        """Count total jobs in the database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM jobs')
+                result = cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.warning(f"Error counting jobs: {e}")
+            return 0
+    
+    def count_applications(self) -> int:
+        """Count total applications in the database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM applications')
+                result = cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.warning(f"Error counting applications: {e}")
+            return 0

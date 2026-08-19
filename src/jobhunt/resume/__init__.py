@@ -1,13 +1,16 @@
 """
 Main resume module for JobHunt application
 """
+import logging
 from pathlib import Path
 from typing import Optional, List
 from .profile_parser import Profile, parse_profile_from_docx, load_profile_from_cache, save_profile_to_cache
 from .tailor import ResumeTailor, create_tailored_docx, TailoredResume
 from .cover_letter import CoverLetterGenerator, CoverLetter
 from .pdf_converter import convert_docx_to_pdf, is_libreoffice_available
+from ..models import Profile as DBProfile
 
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -54,6 +57,49 @@ class ResumeManager:
             save_profile_to_cache(profile, str(cache_path))
         return profile
 
+    def to_db_profile(self, resume_profile: Profile) -> DBProfile:
+        """Convert resume.Profile to models.Profile for database storage"""
+        # Convert experience sections to dictionaries
+        experience_dicts = []
+        for exp in resume_profile.experience:
+            experience_dicts.append({
+                "title": exp.title,
+                "content": exp.content,
+                "bullets": exp.bullets
+            })
+        
+        # Convert education sections to dictionaries
+        education_dicts = []
+        for edu in resume_profile.education:
+            education_dicts.append({
+                "title": edu.title,
+                "content": edu.content,
+                "bullets": edu.bullets
+            })
+        
+        # Convert projects sections to dictionaries
+        projects_dicts = []
+        for project in resume_profile.projects:
+            projects_dicts.append({
+                "title": project.title,
+                "content": project.content,
+                "bullets": project.bullets
+            })
+        
+        return DBProfile(
+            name=resume_profile.name,
+            email=resume_profile.email,
+            phone=resume_profile.phone,
+            location=None,  # Not available in resume profile
+            summary=resume_profile.summary,
+            experience=experience_dicts,
+            education=education_dicts,
+            skills=resume_profile.skills,
+            certifications=resume_profile.certifications,
+            projects=projects_dicts,
+            linkedin_url=None  # Not available in resume profile
+        )
+
     # ------------------------------------------------------------------
     # Tailoring
     # ------------------------------------------------------------------
@@ -78,7 +124,7 @@ class ResumeManager:
             create_tailored_docx(template_path, tailored_resume, output_path)
             return True
         except Exception as e:
-            print(f"Error creating tailored DOCX: {e}")
+            logger.warning(f"Error creating tailored DOCX: {e}")
             return False
 
     # ------------------------------------------------------------------

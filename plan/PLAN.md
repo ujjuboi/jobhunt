@@ -83,6 +83,7 @@ jobhunt/
   - **Open item:** the "streaming agent loop" deliverable is NOT done — `agent.chat()` and
     `chat_with_agent()` are non-streaming (Chat works, but replies render only on completion).
     Fold streaming into Phase 6 (error/retry + timeouts) or a Phase 1 follow-up.
+    **RESOLVED in Phase 6** (2026-08-18): `agent.chat_stream()` + streaming ChatScreen.
 
 **Phase 2 — Data + first source (1-1.5 days)**
 - SQLite schema + repository layer
@@ -124,6 +125,141 @@ jobhunt/
 - Unit tests (fake LLM + source fixtures), integration test vs real Greenhouse
 - Config UI (sources, companies, prompts, model)
 - README + uv scripts
+
+  Status: DONE 2026-08-18 (see `plan/reviewPhase6.md`).
+  - New `jobhunt/llm.py`: retry policy (transient 429/5xx/connect/timeout), 60s client
+    timeouts, default model resolution (env -> user config -> builtin), `complete()` +
+    streaming `stream()` helpers with mid-stream restart.
+  - New `config/user_config.py`: TOML user config (`~/.config/jobhunt/config.toml`,
+    overridable via `JOBHUNT_CONFIG`) with sources.enabled, sources.companies, prompts
+    (system/score), model (chat/embedding/confirm), scoring.mode. `get_scoring_mode()`
+    now falls back to config (env still wins).
+  - Agent `chat()`/`chat_with_agent()` route through the retrying LLM layer; new
+    `chat_stream()` yields deltas. ChatScreen streams replies (falls back to non-streaming
+    when the agent lacks `chat_stream`).
+  - `EmbeddingClient` gets timeouts + transient retry; error `print()`s across agent/db/
+    sources/scoring/resume replaced with module loggers; app initializes logging
+    (stderr + `~/.config/jobhunt/logs/jobhunt.log`, `JOBHUNT_LOG_LEVEL`).
+  - Settings screen is now a Config UI: sources, companies, model, scoring mode, system
+    prompt, Save -> writes TOML.
+  - Tests: `test_llm.py` (retry policy, streaming restart), `test_user_config.py`,
+    `test_chat_streaming.py`, `test_settings.py`; opt-in live Greenhouse integration test
+    (`tests/test_integration_greenhouse.py`, `JOBHUNT_INTEGRATION=1`). Suite: 67 passed.
+  - uv scripts: `jobhunt-smoke`, `jobhunt-test`, `jobhunt-check` (`jobhunt/cli.py`);
+    README updated.
+  - Small correctness fix: LLM confirm scores are normalized to 0..1 (models may return
+    0-100).
+
+**Phase 7 — Close UX gaps (1 day, planned)**
+- Resolve the UI wiring gaps flagged during USER_GUIDE review. The current gaps (G1–G5):
+  - **G1 — No profile save path.** Fit scoring needs a `models.Profile` in the DB, but
+    no screen ever calls `db.save_profile()`; the Fit screen can only ever report "No
+    profile found".
+  - **G2 — Resume generation has no job.** The Resume screen populates
+    `_selected_job_description` / `_selected_company` / `_selected_job_id` nowhere, so
+    the tailored-resume and cover-letter buttons always dead-end at "Select a job from
+    the Jobs screen first" — and the Jobs screen has no way to select a job row.
+  - **G3 — Save to Outputs is a stub.** The button only prints "Outputs feature coming
+    soon" even though `ResumeManager.save_tailored_resume()` /
+    `save_cover_letter_to_output()` already exist.
+  - **G4 — Dashboard is static.** The quick-action buttons do nothing and the stats
+    areas show hardcoded placeholders rather than live counts.
+  - **G5 — Search hardcodes Greenhouse.** The Search screen always calls
+    `run_tool("search_jobs", source="greenhouse", ...)`, ignoring the enabled sources
+    configured in Settings/`config.toml`.
+
+  ### A. Profile auto-save for Fit scoring (G1)
+  **Problem:** nothing saves a `models.Profile`, so fit scoring can never find one (Fit
+  screen shows "No profile found").
+
+  1. Add converter `to_db_profile(resume_profile: resume.Profile) -> models.Profile`:
+     - `resume/profile_parser.py` (or `resume/__init__.py`): map `name`, `email`, `phone`,
+       `summary`, `skills`, `certifications` directly; `experience`/`education`/`projects`
+       via `[{"title", "content", "bullets"}]` from `ResumeSection`; `location` and
+       `linkedin_url` default `None`.
+  2. In `ResumeScreen._update_resume_preview` (src/jobhunt/app/screens/resume.py:70), after
+     `load_profile_from_docx` succeeds:
+     - guard `self.db is None`;
+     - `self.db.save_profile(to_db_profile(profile))`;
+     - append a status note "Profile synced for Fit scoring".
+  3. Tests:
+     - `tests/test_resume.py`: `to_db_profile` round-trip (sections -> dicts).
+     - `tests/test_resume_screen.py`: selecting a docx calls `save_profile` (mock db);
+       `db=None` path does not raise.
+
+  ### B. Wire job selection: Jobs -> Resume (G2)
+  **Problem:** `_selected_job_description`/`_selected_company`/`_selected_job_id` are never
+  populated, so the Resume screen can never generate.
+
+  1. `JobHuntApp` (src/jobhunt/app/__init__.py): add `self.selected_job_id = None` in
+     `__init__`.
+  2. `JobsScreen` (src/jobhunt/app/screens/jobs.py):
+     - in `_update_jobs_table`, pass `key=job.id` to `table.add_row(...)`;
+     - add a `Static(id="jobs_status")` widget to `_get_content`;
+     - add `on_data_table_row_selected(event)`: set `self.app.selected_job_id =
+       event.row_key.value`; look up the job via `self.db.get_job(...)` and update
+       `#jobs_status` with "Selected: <title>".
+  3. `ResumeScreen`:
+     - in `_generate_tailored_resume` and `_generate_cover_letter`, resolve the job first:
+       read `self.app.selected_job_id`, `self.db.get_job(...)`; if missing, show "Select a
+       job row in the Jobs screen first" and return; otherwise populate
+       `_selected_job_description`, `_selected_company`, `_selected_job_id`.
+  4. Tests:
+     - `tests/test_app.py`: row-selection event sets `app.selected_job_id`.
+     - `tests/test_resume_screen.py`: generation resolves description/company from app id
+       + db; missing selection shows the guidance message.
+
+  ### C. Implement "Save to Outputs" (G3)
+  **Problem:** button prints "Outputs feature coming soon".
+
+  1. `ResumeScreen`:
+     - after successful generation, stash `self._last_tailored = tailored` / `self._last_cover_letter
+       = cover_letter`;
+     - `_save_outputs()`:
+       - guard: a generation happened AND a job is selected (`_selected_company`,
+         `_selected_job_id`); else status message;
+       - call `self.resume_manager.save_tailored_resume(self._last_tailored, company,
+         job_id)` and `self.resume_manager.save_cover_letter_to_output(self._last_cover_letter,
+         company, job_id)`;
+       - report returned paths in `#resume_status` (PDF may be `None` if LibreOffice is
+         missing).
+  2. Tests: `tests/test_resume_screen.py` — with mocked `ResumeManager`, `_save_outputs`
+     passes the selected company/job id and surfaces artifact paths.
+
+  ### D. Dashboard quick actions + live counts (G4)
+  **Problem:** quick-action buttons are inert; banner is static.
+
+  1. `JobHuntDB` (src/jobhunt/db/__init__.py): add `count_jobs()` and
+     `count_applications()` (simple `SELECT COUNT(*)` wrappers).
+  2. `JobHuntApp.on_mount`: install `DashboardScreen(db=self.database)`.
+  3. `DashboardScreen` (src/jobhunt/app/screens/dashboard.py):
+     - accept and store `db`; on `on_mount`, update stats: total jobs, total applications,
+       last few job titles in the Recent Activity area;
+     - add `on_button_pressed` that calls `super().on_button_pressed(event)` (nav) then
+       maps `search_jobs_btn` -> "search", `view_jobs_btn` -> "jobs", `generate_resume_btn`
+       -> "resume" via `self.app.switch_screen(...)`.
+  4. Tests: `tests/test_app.py` — dashboard mount renders counts; quick-action buttons
+     switch screens.
+
+  ### E. Search across all enabled sources (G5)
+  **Problem:** Search screen hardcodes `source="greenhouse"`.
+
+  1. `SearchScreen._search` (src/jobhunt/app/screens/search.py:84):
+     - iterate `get_user_config().sources.enabled`;
+     - per source call `self.agent.run_tool("search_jobs", query=query, source=source,
+       limit=10)` inside its own try/except, collecting a notes line for failures (e.g.
+       LinkedIn without env creds);
+     - merge results and dedupe by `(title, company)`;
+     - render with a `[source]` tag per line.
+  2. Tests: new `tests/test_search.py` — monkeypatch `agent.run_tool` to return stubs per
+     source and assert aggregation/dedupe across multiple enabled sources and error
+     handling for a failing source.
+
+  ### F. Ship
+  1. Run `uv run jobhunt-test` — existing 67 tests stay green plus the new ones.
+  2. Update README feature list (search-all-sources, profile sync, job selection, assets
+     saving, dashboard stats).
+  3. Refresh the USER_GUIDE.md limitations section once written (items marked resolved).
 
 **Stretch:** reranker (`bge-reranker-v2-m3`) via `/v1/rerank` to refine final top-k ordering.
 

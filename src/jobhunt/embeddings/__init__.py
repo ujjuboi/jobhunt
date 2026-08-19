@@ -2,11 +2,45 @@
 Embedding client for JobHunt
 Uses oMLX's /v1/embeddings API with BGE-M3 model
 """
+import logging
+import time
+import random
 from typing import List, Optional
 from ..config import get_omlx_settings
+from .. import llm
 import httpx
 
+logger = logging.getLogger(__name__)
+
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+MAX_EMBED_RETRIES = 3
+
+
+def _retry_post(client: httpx.Client, url: str, *, headers: dict, json: dict) -> httpx.Response:
+    """POST with a small retry loop for transient failures (timeout/5xx/429)."""
+    attempts = 0
+    while True:
+        try:
+            response = client.post(url, headers=headers, json=json)
+            if response.status_code in llm.TRANSIENT_STATUS_CODES and attempts < MAX_EMBED_RETRIES:
+                attempts += 1
+                delay = 0.5 * (2 ** (attempts - 1)) + random.uniform(0, 0.1)
+                logger.warning(
+                    "Embedding API transient error %s; retry %d/%d in %.2fs",
+                    response.status_code, attempts, MAX_EMBED_RETRIES, delay,
+                )
+                time.sleep(delay)
+                continue
+            return response
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            if attempts >= MAX_EMBED_RETRIES:
+                raise
+            attempts += 1
+            delay = 0.5 * (2 ** (attempts - 1)) + random.uniform(0, 0.1)
+            logger.warning("Embedding API transport error %s; retry %d/%d in %.2fs",
+                           e, attempts, MAX_EMBED_RETRIES, delay)
+            time.sleep(delay)
 
 
 class EmbeddingClient:
@@ -16,12 +50,12 @@ class EmbeddingClient:
         settings = get_omlx_settings()
         self.base_url = settings.base_url
         self.api_key = settings.api_key
-        self.client = httpx.Client()
+        self.client = httpx.Client(timeout=llm.DEFAULT_TIMEOUT_SECONDS)
 
     def embed_text(
         self,
         text: str,
-        model: str = "bge-m3-mlx-fp16",
+        model: Optional[str] = None,
         use_bge_prefix: bool = False,
     ) -> Optional[List[float]]:
         """Generate a normalized embedding for a single text.
@@ -35,14 +69,15 @@ class EmbeddingClient:
             if use_bge_prefix:
                 payload = f"{BGE_QUERY_PREFIX}{text}"
 
-            response = self.client.post(
+            response = _retry_post(
+                self.client,
                 f"{self.base_url}/embeddings",
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": model,
+                    "model": model or llm.get_default_model("embedding"),
                     "input": [payload],
                     "encoding_format": "float",
                 },
@@ -53,17 +88,17 @@ class EmbeddingClient:
                 embedding = data["data"][0]["embedding"]
                 return self.normalize_embedding(embedding)
             else:
-                print(f"Embedding API error: {response.status_code} - {response.text}")
+                logger.error("Embedding API error: %s - %s", response.status_code, response.text)
                 return None
 
         except Exception as e:
-            print(f"Error generating embedding: {e}")
+            logger.warning("Error generating embedding: %s", e, exc_info=True)
             return None
 
     def embed_batch(
         self,
         texts: List[str],
-        model: str = "bge-m3-mlx-fp16",
+        model: Optional[str] = None,
         use_bge_prefix: bool = False,
     ) -> Optional[List[List[float]]]:
         """Generate normalized embeddings for a batch of texts."""
@@ -71,14 +106,15 @@ class EmbeddingClient:
             if use_bge_prefix:
                 texts = [f"{BGE_QUERY_PREFIX}{t}" for t in texts]
 
-            response = self.client.post(
+            response = _retry_post(
+                self.client,
                 f"{self.base_url}/embeddings",
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": model,
+                    "model": model or llm.get_default_model("embedding"),
                     "input": texts,
                     "encoding_format": "float",
                 },
@@ -91,11 +127,11 @@ class EmbeddingClient:
                 embeddings = [item["embedding"] for item in items]
                 return [self.normalize_embedding(v) for v in embeddings]
             else:
-                print(f"Batch embedding API error: {response.status_code} - {response.text}")
+                logger.error("Batch embedding API error: %s - %s", response.status_code, response.text)
                 return None
 
         except Exception as e:
-            print(f"Error generating batch embeddings: {e}")
+            logger.warning("Error generating batch embeddings: %s", e, exc_info=True)
             return None
 
     def normalize_embedding(self, embedding: List[float]) -> List[float]:

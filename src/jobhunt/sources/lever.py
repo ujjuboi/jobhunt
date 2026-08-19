@@ -1,10 +1,13 @@
 """
 Lever job board adapter
 """
+import logging
 from typing import List, Optional
 from ..models import Job
 from ..sources import SourceAdapter
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class LeverAdapter(SourceAdapter):
@@ -48,20 +51,15 @@ class LeverAdapter(SourceAdapter):
             return jobs
             
         except Exception as e:
-            print(f"Error fetching jobs from Lever: {e}")
+            logger.warning(f"Error fetching jobs from Lever: {e}")
             return []
     
     def get_job_detail(self, job_id: str) -> Optional[Job]:
         """Get detailed information about a Lever job"""
-        try:
-            # Lever jobs are usually retrieved by company slug, so we'd need to search
-            # This is a simplified approach - in practice, Lever typically doesn't offer
-            # a single job detail endpoint, but we're providing an implementation
-            raise NotImplementedError("Lever job detail endpoint not implemented")
-            
-        except Exception as e:
-            print(f"Error fetching job detail from Lever: {e}")
-            return None
+        # Lever jobs are usually retrieved by company slug; there is no single
+        # job-detail endpoint to call directly.
+        logger.warning("Lever job detail endpoint not implemented")
+        return None
     
     def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
         """Search for jobs using a query"""

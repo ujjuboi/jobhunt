@@ -9,7 +9,7 @@ from .screens.fit import FitScreen
 from .screens.resume import ResumeScreen
 from .screens.chat import ChatScreen
 from .screens.settings import SettingsScreen
-from .. import db
+from ..logging import setup_logging
 
 
 class JobHuntApp(App):
@@ -17,12 +17,17 @@ class JobHuntApp(App):
 
     CSS_PATH = "app.tcss"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        setup_logging()
+        self.selected_job_id = None
+        # Initialize database
+        from ..db import JobHuntDB
+        self.database = JobHuntDB()
+
     def on_mount(self):
         """Called when the application is mounted"""
-        # Initialize database
-        self.database = db.JobHuntDB()
-        
-        self.install_screen(DashboardScreen(), name="dashboard")
+        self.install_screen(DashboardScreen(db=self.database), name="dashboard")
         self.install_screen(SearchScreen(db=self.database), name="search")
         self.install_screen(JobsScreen(db=self.database), name="jobs")
         self.install_screen(FitScreen(db=self.database), name="fit")

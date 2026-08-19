@@ -7,7 +7,9 @@ A focused TUI app tuned for job hunting, running entirely against your local oML
 - Scrapes job boards and scores job fit against your resume using local embeddings
 - Generates ATS-friendly tailored resumes and cover letters
 - Runs entirely locally with your oMLX server
-- **Supports multiple job board sources** including LinkedIn and Indeed (web scraping)
+- Supports multiple job board sources including LinkedIn and Indeed (web scraping)
+- Streaming agent chat with retry/timeout handling when oMLX is briefly unavailable
+- Config UI for sources, target companies, prompts, model, and scoring mode
 
 ## Requirements
 
@@ -49,11 +51,10 @@ A focused TUI app tuned for job hunting, running entirely against your local oML
    uv run playwright install chromium
    ```
 
-4. Run the smoke test to verify the oMLX connection
-   (tool-call round-trip, structured JSON, embeddings):
+4. Verify the oMLX connection (tool-call round-trip, structured JSON, embeddings):
 
    ```bash
-   uv run python smoke.py
+   uv run jobhunt-smoke
    ```
 
 5. Launch the TUI:
@@ -62,4 +63,69 @@ A focused TUI app tuned for job hunting, running entirely against your local oML
    uv run jobhunt
    ```
 
-See `plan/PLAN.md` for the full architecture and milestones.
+## Configuration
+
+The app reads a user config from `~/.config/jobhunt/config.toml`
+(`JOBHUNT_CONFIG` overrides the path). If absent, sensible defaults are used and
+a file is created when you **Save Config** from the Settings screen.
+
+The Settings screen edits the active sources, target company slugs, chat model,
+scoring mode, and the system prompt. You can also edit the TOML by hand:
+
+```toml
+[sources]
+enabled = ["greenhouse", "lever", "ashby"]
+
+[sources.companies]
+greenhouse = ["stripe"]
+
+[prompts]
+system = "You are a helpful job-hunting assistant."
+score = 'Score how well this candidate profile fits this job posting. Respond with JSON only, using keys: "score" (0.0 to 1.0), "explanation" (short reason), "matched_skills" (list), "missing_skills" (list), "suggested_bullets" (list).'
+
+[model]
+chat = "Qwen3-30B-A3B-6bit"
+embedding = "bge-m3-mlx-fp16"
+confirm = "Qwen3-30B-A3B-6bit"
+
+[scoring]
+mode = "hybrid"
+```
+
+Environment overrides (highest precedence):
+- `OMLX_API_KEY`, `OMLX_BASE_URL` — oMLX credentials/endpoint
+- `JOBHUNT_CHAT_MODEL`, `JOBHUNT_EMBEDDING_MODEL`, `JOBHUNT_CONFIRM_MODEL`
+- `JOBHUNT_SCORING_MODE` (hybrid | embedding | llm)
+- `JOBHUNT_LOG_LEVEL`
+
+Logs go to stderr and `~/.config/jobhunt/logs/jobhunt.log`.
+
+## Development
+
+```bash
+# Run the full test suite
+uv run jobhunt-test
+
+# Smoke test the oMLX connection, then run the suite
+uv run jobhunt-check
+
+# Also available as plain uv commands
+uv run pytest tests/
+uv run python smoke.py
+```
+
+### Integration tests
+
+API-based source tests use mocked payloads so the default suite runs offline.
+A live integration test against the real Greenhouse board API is opt-in:
+
+```bash
+# Default org is a large public Greenhouse customer; override with GREENHOUSE_ORG
+JOBHUNT_INTEGRATION=1 uv run pytest -m integration
+```
+
+## Project Layout
+
+See `plan/PLAN.md` for the full architecture and milestones. Phase 6 polishes
+the harness with retry/timeout handling, structured logging, a config UI,
+a unit + integration test suite, uv scripts, and a streaming agent loop.

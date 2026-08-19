@@ -1,10 +1,13 @@
 """
 Ashby job board adapter
 """
+import logging
 from typing import List, Optional
 from ..models import Job
 from ..sources import SourceAdapter
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class AshbyAdapter(SourceAdapter):
@@ -46,19 +49,14 @@ class AshbyAdapter(SourceAdapter):
             return jobs
             
         except Exception as e:
-            print(f"Error fetching jobs from Ashby: {e}")
+            logger.warning(f"Error fetching jobs from Ashby: {e}")
             return []
     
     def get_job_detail(self, job_id: str) -> Optional[Job]:
         """Get detailed information about an Ashby job"""
-        try:
-            # This should be implemented with a specific job detail endpoint, 
-            # which is likely based on the job ID or company slug
-            raise NotImplementedError("Ashby job detail endpoint not implemented")
-            
-        except Exception as e:
-            print(f"Error fetching job detail from Ashby: {e}")
-            return None
+        # No public single-job endpoint for the posting API.
+        logger.warning("Ashby job detail endpoint not implemented")
+        return None
     
     def search_jobs(self, query: str, limit: int = 50) -> List[Job]:
         """Search for jobs using a query"""

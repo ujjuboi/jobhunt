@@ -5,6 +5,7 @@ Implements the Phase 5 plan: persisted session cookie jar (headful first
 login, headless afterwards with the saved storage state), polite delays,
 and ToS-aware. Intended to be feature-flagged / opt-in.
 """
+import logging
 import os
 import re
 from pathlib import Path
@@ -14,6 +15,8 @@ from playwright.sync_api import sync_playwright
 
 from ..models import Job
 from ..sources import SourceAdapter
+
+logger = logging.getLogger(__name__)
 
 # Repo-local cache dir, anchored to the project root regardless of CWD.
 CACHE_DIR = Path(__file__).resolve().parents[3] / "cache"
@@ -139,7 +142,7 @@ class LinkedInAdapter(SourceAdapter):
 
             return jobs
         except Exception as e:
-            print(f"Error fetching jobs from LinkedIn: {e}")
+            logger.warning(f"Error fetching jobs from LinkedIn: {e}")
             return []
         finally:
             self._close_browser()
@@ -173,7 +176,7 @@ class LinkedInAdapter(SourceAdapter):
                 "posted_date": None,
             })
         except Exception as e:
-            print(f"Error fetching job detail from LinkedIn: {e}")
+            logger.warning(f"Error fetching job detail from LinkedIn: {e}")
             return None
         finally:
             self._close_browser()

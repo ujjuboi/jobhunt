@@ -2,10 +2,21 @@
 Configuration module for JobHunt
 Handles oMLX settings and user configuration
 """
+import logging
 import os
 import json
 from functools import lru_cache
 from pydantic import BaseModel
+
+from .user_config import (  # noqa: F401
+    UserConfig,
+    get_user_config,
+    load_user_config,
+    save_user_config,
+    config_path,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class OEMLXSettings(BaseModel):
@@ -52,7 +63,7 @@ def load_omlx_settings() -> OEMLXSettings:
                 
             return OEMLXSettings(base_url=base_url, api_key=api_key)
         except (json.JSONDecodeError, OSError) as e:
-            print(f"Warning: Could not read oMLX settings from {omx_settings_path}: {e}")
+            logger.warning("Could not read oMLX settings from %s: %s", omx_settings_path, e)
     
     # Fall back to environment variables
     base_url = os.environ.get('OMLX_BASE_URL', 'http://127.0.0.1:8000/v1')
@@ -76,9 +87,15 @@ VALID_SCORING_MODES = ("hybrid", "embedding", "llm")
 def get_scoring_mode() -> str:
     """
     Return the fit-scoring mode: hybrid | embedding | llm.
-    Overridable via JOBHUNT_SCORING_MODE; defaults to hybrid.
+    Precedence: JOBHUNT_SCORING_MODE env var -> user config -> hybrid.
     """
-    mode = os.environ.get("JOBHUNT_SCORING_MODE", "hybrid").lower()
+    mode = os.environ.get("JOBHUNT_SCORING_MODE")
+    if mode is None:
+        try:
+            mode = get_user_config().scoring.mode
+        except Exception:
+            mode = "hybrid"
+    mode = mode.lower().strip()
     if mode not in VALID_SCORING_MODES:
         raise ValueError(
             f"Invalid scoring mode '{mode}'. Expected one of: {', '.join(VALID_SCORING_MODES)}"

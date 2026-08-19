@@ -4,6 +4,7 @@ Indeed job board adapter using Playwright.
 ToS-aware, opt-in scraping. See plan/PLAN.md Phase 5 for the intended
 feature-flag and cookie-jar/session design.
 """
+import logging
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -12,6 +13,8 @@ from playwright.sync_api import sync_playwright
 
 from ..models import Job
 from ..sources import SourceAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class IndeedAdapter(SourceAdapter):
@@ -112,7 +115,7 @@ class IndeedAdapter(SourceAdapter):
 
             return jobs
         except Exception as e:
-            print(f"Error fetching jobs from Indeed: {e}")
+            logger.warning(f"Error fetching jobs from Indeed: {e}")
             return []
         finally:
             self._close_browser()
@@ -148,7 +151,7 @@ class IndeedAdapter(SourceAdapter):
                 "posted_date": None,
             })
         except Exception as e:
-            print(f"Error fetching job detail from Indeed: {e}")
+            logger.warning(f"Error fetching job detail from Indeed: {e}")
             return None
         finally:
             self._close_browser()

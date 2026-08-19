@@ -3,14 +3,16 @@ Agent module for JobHunt
 Handles tool calling and agent loop
 """
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterator
 from openai import OpenAI
-from ..config import get_omlx_settings
+from ..config import get_omlx_settings, get_user_config
 from ..models import Job, FitScore, Profile, Application
 from ..sources import get_source_adapter
 from ..db import JobHuntDB
 from ..embeddings import EmbeddingClient
 from ..scoring import ScorePipeline
+from .. import llm
+from ..llm import get_default_model
 import json
 import hashlib
 import logging
@@ -67,12 +69,19 @@ class ToolRegistry:
     
     # Tool implementations
     
-    def search_jobs(self, query: str, source: str = "greenhouse", company: str = "", limit: int = 50) -> List[Job]:
-        """Search for jobs using a query on specified source"""
+    def search_jobs(self, query: str, source: str = "", company: str = "", limit: int = 50) -> List[Job]:
+        """Search for jobs using a query on specified source."""
         if not self.db:
-            # Debug: return empty list if DB not initialized
             return []
-            
+
+        # Resolve defaults from user config when not specified explicitly.
+        config = get_user_config()
+        if not source:
+            source = config.sources.enabled[0] if config.sources.enabled else "greenhouse"
+        if not company:
+            companies = config.companies_for(source)
+            company = companies[0] if companies else ""
+
         try:
             # LinkedIn needs credentials (env overridable); other sources are
             # API-key-less by default (greenhouse/lever/ashby accept None).
@@ -84,35 +93,35 @@ class ToolRegistry:
                 )
             else:
                 adapter = get_source_adapter(source)
-                
+
             if company:
                 jobs = adapter.get_jobs(company, limit)
             else:
                 jobs = adapter.search_jobs(query, limit)
-            
+
             # Deduplicate jobs
             jobs = self._dedupe_jobs(jobs)
-            
+
             # Save jobs to database
             for job in jobs:
                 self.db.save_job(job)
-                
+
             return jobs
-            
+
         except Exception as e:
-            print(f"Error searching jobs: {e}")
+            logger.warning("Error searching jobs via %s: %s", source, e, exc_info=True)
             return []
-        
+
     def get_job_detail(self, job_id: str) -> Optional[Job]:
         """Get detailed information about a specific job"""
         if not self.db:
             return None
-            
+
         try:
             # Try to get from local database first
             return self.db.get_job(job_id)
         except Exception as e:
-            print(f"Error getting job detail: {e}")
+            logger.warning("Error getting job detail for %s: %s", job_id, e, exc_info=True)
             return None
         
     def score_fit(self, job_id: str, profile: Profile) -> FitScore:
@@ -137,7 +146,7 @@ class ToolRegistry:
             results = pipeline.score([job], profile, mode="hybrid", top_n=1)
             return results[0] if results else _failed("No score could be computed")
         except Exception as e:
-            print(f"Error scoring fit: {e}")
+            logger.warning("Fit scoring failed for job %s: %s", job_id, e, exc_info=True)
             return _failed(f"Fit scoring failed: {e}")
         
     def tailor_resume(self, job_id: str, profile: Profile) -> str:
@@ -256,32 +265,34 @@ class ToolRegistry:
             
             return self.db.save_application(application)
         except Exception as e:
-            print(f"Error updating status: {e}")
+            logger.warning("Error updating status for job %s: %s", job_id, e, exc_info=True)
             return False
-        
+
     def list_jobs(self) -> List[Job]:
         """List all jobs"""
         if not self.db:
             return []
-            
+
         try:
             return self.db.get_jobs()
         except Exception as e:
-            print(f"Error listing jobs: {e}")
+            logger.warning("Error listing jobs: %s", e, exc_info=True)
             return []
 
 
 class JobHuntAgent:
     """Main agent class for handling job hunting tasks"""
-    
+
     def __init__(self, db: JobHuntDB = None):
         settings = get_omlx_settings()
         self.client = OpenAI(
             base_url=settings.base_url,
-            api_key=settings.api_key
+            api_key=settings.api_key,
+            timeout=llm.DEFAULT_TIMEOUT_SECONDS,
+            max_retries=2,
         )
         self.tool_registry = ToolRegistry(db, agent=self)
-        
+
     def run_tool(self, tool_name: str, **kwargs) -> Any:
         """Execute a tool with given arguments"""
         tool = self.tool_registry.get_tool(tool_name)
@@ -289,29 +300,51 @@ class JobHuntAgent:
             return tool(**kwargs)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
-            
-    def chat(self, messages: List[Dict[str, str]], model: str = "Qwen3-30B-A3B-6bit") -> str:
-        """Chat with the agent, returning the plain-text reply content."""
+
+    def _resolve_model(self, model: Optional[str]) -> str:
+        if model:
+            return model
+        # Check environment variable first
+        env_var = "JOBHUNT_CHAT_MODEL"
+        env_val = os.environ.get(env_var)
+        if env_val:
+            return env_val
+        # Then check config
+        config = get_user_config()
+        if config.model and config.model.chat:
+            return config.model.chat
+        # Fall back to default
+        return get_default_model("chat")
+
+    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
+        """Chat with the agent, returning the plain-text reply content.
+
+        Uses the retrying LLM layer; transient oMLX failures are retried.
+        """
+        return llm.complete(
+            messages,
+            model=self._resolve_model(model),
+            temperature=0.1,
+        )
+
+    def chat_stream(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> Iterator[str]:
+        """Chat with the agent, yielding reply text deltas as they stream in."""
+        return llm.stream(
+            messages,
+            model=self._resolve_model(model),
+            temperature=0.1,
+        )
+
+    def chat_with_agent(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> Dict[str, Any]:
+        """Chat with the agent using structured responses (strict JSON object)."""
+        content = llm.complete(
+            messages,
+            model=self._resolve_model(model),
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
         try:
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.1,
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            raise Exception(f"Failed to communicate with agent: {e}")
-            
-    def chat_with_agent(self, messages: List[Dict[str, str]], model: str = "Qwen3-30B-A3B-6bit") -> Dict[str, Any]:
-        """Chat with the agent using structured responses"""
-        try:
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            # Handle errors appropriately
-            raise Exception(f"Failed to communicate with agent: {e}")
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.warning("Agent returned non-JSON to chat_with_agent: %s", content[:200])
+            raise Exception(f"Agent returned invalid JSON: {e}") from e

@@ -35,9 +35,19 @@ dev = [
 
 [project.scripts]
 jobhunt = "jobhunt:main"
+jobhunt-smoke = "jobhunt.cli:smoke"
+jobhunt-test = "jobhunt.cli:test"
+jobhunt-check = "jobhunt.cli:check"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: hits real external APIs; opt-in via JOBHUNT_INTEGRATION=1",
+]
