@@ -45,7 +45,7 @@ def test_settings_screen_mounts_and_populates(monkeypatch):
     asyncio.run(run())
 
 
-def test_settings_saves_linkedin_credentials(monkeypatch):
+def test_settings_saves_user_config(monkeypatch):
     captured = _stub_deps(monkeypatch)
 
     async def run():
@@ -55,16 +55,13 @@ def test_settings_saves_linkedin_credentials(monkeypatch):
             await pilot.click("#settings_btn")
             await asyncio.sleep(0.1)
             app.screen.query_one("#sources_input").value = "greenhouse, linkedin"
-            app.screen.query_one("#linkedin_email").value = "alice@example.com"
-            app.screen.query_one("#linkedin_password").value = "secret123"
             await pilot.click("#save_config_btn")
             await asyncio.sleep(0.1)
 
     asyncio.run(run())
 
     cfg = captured["config"]
-    assert cfg.linkedin.email == "alice@example.com"
-    assert cfg.linkedin.password == "secret123"
+    assert cfg.sources.enabled == ["greenhouse", "linkedin"]
 
 
 def test_linkedin_block_toggles_with_sources(monkeypatch):
@@ -96,17 +93,15 @@ def test_linkedin_block_toggles_with_sources(monkeypatch):
 
 
 def test_linkedin_login_button_flows(monkeypatch):
-    captured = _stub_deps(monkeypatch)
+    _stub_deps(monkeypatch)
     calls = {}
 
     class FakeLinkedInAdapter:
-        def __init__(self, email="", password="", session_file=None):
-            self.email = email
-            self.password = password
+        def __init__(self, session_file=None):
+            self.session_file = session_file
 
-        def login(self, email="", password=""):
-            calls["email"] = email
-            calls["password"] = password
+        def login(self):
+            calls["logged_in"] = True
             return True
 
     monkeypatch.setattr("jobhunt.sources.linkedin.LinkedInAdapter", FakeLinkedInAdapter)
@@ -121,8 +116,6 @@ def test_linkedin_login_button_flows(monkeypatch):
             screen.query_one("#sources_input").value = "greenhouse, linkedin"
             screen._toggle_linkedin_block()
             await asyncio.sleep(0.1)
-            screen.query_one("#linkedin_email").value = "alice@example.com"
-            screen.query_one("#linkedin_password").value = "secret123"
             await pilot.click("#linkedin_login_btn")
             await asyncio.sleep(0.5)
             assert "LinkedIn logged in" in screen.query_one("#linkedin_status").content
@@ -130,9 +123,7 @@ def test_linkedin_login_button_flows(monkeypatch):
 
     asyncio.run(run())
 
-    assert calls["email"] == "alice@example.com"
-    assert calls["password"] == "secret123"
-    assert captured["config"].linkedin.email == "alice@example.com"
+    assert calls["logged_in"] is True
 
 
 def test_settings_save_writes_user_config(monkeypatch):
@@ -145,7 +136,6 @@ def test_settings_save_writes_user_config(monkeypatch):
             await pilot.click("#settings_btn")
             await asyncio.sleep(0.1)
             app.screen.query_one("#sources_input").value = "greenhouse, ashby"
-            app.screen.query_one("#companies_input").value = "  stripe , ramp "
             app.screen.query_one("#model_input").value = "ACustomModel"
             app.screen.query_one("#score_mode_select").value = "llm"
             app.screen.query_one("#system_prompt").text = "Be concise."
@@ -158,8 +148,6 @@ def test_settings_save_writes_user_config(monkeypatch):
     cfg = captured["config"]
     assert isinstance(cfg, UserConfig)
     assert cfg.sources.enabled == ["greenhouse", "ashby"]
-    # Companies are distributed round-robin across enabled sources
-    assert cfg.sources.companies == {"greenhouse": ["stripe"], "ashby": ["ramp"]}
     assert cfg.model.chat == "ACustomModel"
     assert cfg.scoring.mode == "llm"
     assert cfg.prompts.system == "Be concise."

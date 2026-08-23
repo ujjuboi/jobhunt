@@ -21,13 +21,13 @@ This document explains how to use the different job board adapters in JobHunt, i
 
 ### 4. LinkedIn (Web Scraping)
 - **Source Type**: `linkedin`
-- **Authentication**: Email and Password Required
-- **Usage**: `get_source_adapter('linkedin', email='your-email', password='your-password')`
-- **Via the agent**: set `LINKEDIN_EMAIL` and `LINKEDIN_PASSWORD` environment variables.
+- **Authentication**: Browser login (no stored credentials)
+- **Usage**: `get_source_adapter('linkedin')`
+- **Via the UI**: on the Settings screen, enable `linkedin` and click **Login to LinkedIn**.
 - **Setup**: install the browser first with `uv run playwright install chromium`.
-- **Session**: credentials are only used once — the first run logs in in a visible
-  (headful) browser and saves the session cookie jar to `cache/linkedin_session.json`.
-  Later runs reuse it in headless mode.
+- **Session**: signing in happens once in a visible (headful) browser — the user
+  enters their credentials there — and the session cookie jar is saved to
+  `cache/linkedin_session.json`. Later runs reuse it in headless mode.
 
 > ⚠️ **Important**: LinkedIn scraping is against LinkedIn's Terms of Service. This implementation is provided for educational purposes only.
 > 

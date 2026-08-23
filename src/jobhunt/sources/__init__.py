@@ -55,12 +55,8 @@ def get_source_adapter(source_type: str, api_key: str = None, **kwargs) -> Sourc
         return AshbyAdapter(api_key)
     elif source_type.lower() == 'linkedin':
         from .linkedin import LinkedInAdapter
-        # LinkedIn requires email and password, not an API key
-        email = kwargs.get('email')
-        password = kwargs.get('password')
-        if not email or not password:
-            raise ValueError("LinkedIn adapter requires email and password")
-        return LinkedInAdapter(email=email, password=password)
+        # LinkedIn signs in through the browser; the session is persisted in cache.
+        return LinkedInAdapter()
     elif source_type.lower() == 'indeed':
         from .indeed import IndeedAdapter
         # Indeed doesn't require an API key

@@ -32,6 +32,16 @@ class JobsScreen(BaseScreen):
     def on_mount(self):
         """Initialize the screen when mounted"""
         self._load_jobs()
+
+    def on_screen_resume(self):
+        """Reload jobs whenever the user returns to this screen."""
+        if self.is_mounted:
+            self._load_jobs()
+
+    def on_button_pressed(self, event: Button.Pressed):
+        super().on_button_pressed(event)
+        if event.button.id == "refresh_button":
+            self._load_jobs()
         
     def on_data_table_row_selected(self, event):
         """Handle row selection events"""
@@ -76,16 +86,22 @@ class JobsScreen(BaseScreen):
     def _show_jobs_error(self, message: str):
         """Display an error message in the jobs table."""
         table = self.query_one("#jobs_table", DataTable)
-        table.clear()
+        table.clear(columns=True)
         table.add_column("Error", key="error", width=40)
         table.add_row(message)
     
     def _update_jobs_table(self, jobs):
         """Update the jobs table with loaded data"""
-        # Clear existing table data
+        # Clear existing table data (including columns for a clean re-render)
         table = self.query_one("#jobs_table", DataTable)
-        table.clear()
-        
+        table.clear(columns=True)
+
+        if not jobs:
+            table.add_column("Message", key="message", width=40)
+            table.add_row("No jobs found. Run a search first, then Refresh.")
+            self.query_one("#jobs_status").update("0 jobs in database")
+            return
+
         # Add columns
         table.add_column("ID", key="id", width=10)
         table.add_column("Title", key="title", width=30)
@@ -103,3 +119,7 @@ class JobsScreen(BaseScreen):
                 job.posted_date.strftime("%Y-%m-%d") if job.posted_date else "N/A",
                 key=job.id  # Add job ID as key for row selection
             )
+        total = self.db.count_jobs() if self.db else len(jobs)
+        self.query_one("#jobs_status").update(
+            f"Showing {min(len(jobs), 20)} of {total} jobs"
+        )

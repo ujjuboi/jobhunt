@@ -50,15 +50,12 @@ The app reads a user config from `~/.config/jobhunt/config.toml`. If the file
 doesn't exist, sensible defaults are used; a file is created the first time you
 press **Save Config** on the Settings screen.
 
-The Settings screen edits the active sources, target company slugs, chat model,
+The Settings screen edits the active sources, chat model,
 scoring mode, and system prompt. You can also edit the TOML by hand:
 
 ```toml
 [sources]
 enabled = ["greenhouse", "lever", "ashby"]
-
-[sources.companies]
-greenhouse = ["stripe"]
 
 [prompts]
 system = "You are a helpful job-hunting assistant."
@@ -83,7 +80,6 @@ Environment variables take precedence over the config file:
 | `JOBHUNT_CONFIRM_MODEL` | Override the fit-scoring LLM model |
 | `JOBHUNT_SCORING_MODE` | `hybrid` (default) \| `embedding` \| `llm` |
 | `JOBHUNT_LOG_LEVEL` | Logging verbosity (e.g. `DEBUG`, `INFO`, `WARNING`) |
-| `LINKEDIN_EMAIL`, `LINKEDIN_PASSWORD` | Credentials for the LinkedIn source |
 
 Logs are written to stderr and to `~/.config/jobhunt/logs/jobhunt.log`.
 
@@ -181,7 +177,7 @@ transient oMLX hiccups are retried automatically.
 ### Settings
 
 - Read-only **oMLX connection** details (base URL; the API key is masked).
-- Editable **application settings**: enabled sources, company slugs, chat model,
+- Editable **application settings**: enabled sources, chat model,
   and scoring mode.
 - Editable **system prompt** used by the Chat screen.
 - **Save Config** writes everything to `~/.config/jobhunt/config.toml`.
@@ -196,7 +192,7 @@ Managed on the Settings screen under "Enabled sources".
 | **Lever** | API | Open job board API; optional API key |
 | **Ashby** | API | Open job board API; optional API key |
 | **Indeed** | Web scrape | No key; requires Playwright chromium |
-| **LinkedIn** | Web scrape | Requires `LINKEDIN_EMAIL` / `LINKEDIN_PASSWORD` |
+| **LinkedIn** | Web scrape | Log in once through the browser (Settings → Login to LinkedIn) |
 
 For the web-scraping sources:
 
@@ -231,7 +227,7 @@ Other data locations:
 | Fit/Resume prompt to select a job | Choose a job row on the Jobs screen first. |
 | "Base resume directory not found" | Create the `../Resumes/` sibling folder and put your `.docx` resume(s) there. |
 | No `.pdf` in outputs | LibreOffice isn't installed; the `.docx` is still saved. Run `brew install libreoffice`. |
-| LinkedIn source errors | Set `LINKEDIN_EMAIL` / `LINKEDIN_PASSWORD`; install the Playwright browser; delete `cache/linkedin_session.json` if the session is stale. |
+| LinkedIn source errors | Log in again via Settings → Login to LinkedIn (a browser opens so you can sign in); install the Playwright browser; delete `cache/linkedin_session.json` if the session is stale. |
 | Playwright/Chromium errors | Run `uv run playwright install chromium`. |
 | Scored jobs look wrong | Check the scoring mode in Settings; `hybrid` is a good default. |
 

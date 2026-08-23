@@ -37,13 +37,12 @@ class FitScreen(BaseScreen):
 
     def on_mount(self):
         """Initialize the screen when mounted"""
-        table = self.query_one("#fit_table", DataTable)
-        table.add_column("Rank", key="rank", width=6)
-        table.add_column("Title", key="title", width=30)
-        table.add_column("Company", key="company", width=20)
-        table.add_column("Location", key="location", width=15)
-        table.add_column("Score", key="score", width=8)
-        self._update_status()
+        self._refresh_jobs()
+
+    def on_screen_resume(self):
+        """Reload the job list whenever the user returns to this screen."""
+        if self.is_mounted:
+            self._refresh_jobs()
 
     def on_button_pressed(self, event):
         """Handle button presses"""
@@ -82,6 +81,70 @@ class FitScreen(BaseScreen):
             for worker in self.workers
         )
 
+    def _refresh_jobs(self):
+        """Load the saved jobs into the table (unscored) in the background."""
+        if self._is_busy():
+            return
+        self.run_worker(self._async_load_jobs, group="fit-load", exclusive=True)
+
+    async def _async_load_jobs(self):
+        try:
+            jobs = await asyncio.to_thread(self._list_jobs)
+            self.call_after_refresh(self._render_jobs, jobs)
+        except Exception as e:
+            self.call_after_refresh(self._update_status, f"Error loading jobs: {e}")
+
+    def _list_jobs(self):
+        """Blocking job listing helper, run off the event loop."""
+        if self.agent is None:
+            self.agent = JobHuntAgent(self.db)
+        return self.agent.run_tool("list_jobs")
+
+    def _render_jobs(self, jobs):
+        """Render the job list (unscored) so the page is never an empty void."""
+        if self._is_busy():
+            return
+        table = self.query_one("#fit_table", DataTable)
+        table.clear(columns=True)
+        self._fits = {}
+
+        self._add_columns(table)
+        if not jobs:
+            table.add_column("Message", key="message", width=40)
+            table.add_row("No jobs found. Run a search first, then Analyze.")
+            self._update_status("No jobs in database.")
+            return
+
+        for rank, job in enumerate(jobs, start=1):
+            table.add_row(
+                str(rank),
+                job.title[:30] + "..." if len(job.title) > 30 else job.title,
+                job.company[:20] + "..." if len(job.company) > 20 else job.company,
+                job.location or "N/A",
+                "—",
+                key=job.id,
+            )
+
+        if not self.db or not self.db.get_profile():
+            msg = (
+                f"{len(jobs)} jobs available. No profile found — "
+                "save a profile (Resume screen) before scoring."
+            )
+        else:
+            msg = (
+                f"{len(jobs)} jobs available (mode: {get_scoring_mode()}). "
+                "Click Analyze to score."
+            )
+        self._update_status(msg)
+
+    @staticmethod
+    def _add_columns(table: DataTable):
+        table.add_column("Rank", key="rank", width=6)
+        table.add_column("Title", key="title", width=30)
+        table.add_column("Company", key="company", width=20)
+        table.add_column("Location", key="location", width=15)
+        table.add_column("Score", key="score", width=8)
+
     def _analyze(self):
         if self._is_busy():
             return
@@ -111,13 +174,15 @@ class FitScreen(BaseScreen):
 
     def _render_results(self, fits: list):
         table = self.query_one("#fit_table", DataTable)
-        table.clear()
+        table.clear(columns=True)
         self._fits = {}
 
         if not fits:
-            self._update_status("No scores could be computed (check profile and oMLX).")
+            self._render_jobs(self._list_jobs())
+            self._update_status("Scoring produced no results — check profile and oMLX, then try again.")
             return
 
+        self._add_columns(table)
         for rank, fit in enumerate(fits, start=1):
             job = self.db.get_job(fit.job_id)
             if not job:

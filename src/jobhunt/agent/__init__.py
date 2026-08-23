@@ -14,7 +14,6 @@ from ..scoring import ScorePipeline
 from .. import llm
 from ..llm import get_default_model
 import json
-import hashlib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,23 +47,31 @@ class ToolRegistry:
         return list(self.tools.keys())
     
     def _dedupe_jobs(self, jobs: List[Job]) -> List[Job]:
-        """Remove duplicate jobs based on title and company"""
-        if not self.db:
-            return jobs
-            
+        """Remove in-batch duplicates by job id and (title, company).
+
+        Re-fetched jobs that are already stored in the database are kept so
+        repeated browses still list them; save_job upserts by id.
+        """
         deduped_jobs = []
-        seen_hashes = set()
-        
+        seen_ids = set()
+        seen_keys = set()
+
         for job in jobs:
-            # Create a hash based on title and company (simplified deduplication)
-            job_hash = hashlib.md5(f"{job.title}-{job.company}".encode()).hexdigest()
-            if job_hash not in seen_hashes:
-                seen_hashes.add(job_hash)
-                # Also check if job is already in the database
-                existing_job = self.db.get_job(job.id)
-                if not existing_job:
-                    deduped_jobs.append(job)
-                    
+            job_id = getattr(job, "id", None) or ""
+            if job_id and job_id in seen_ids:
+                continue
+            if job_id:
+                seen_ids.add(job_id)
+
+            title = (job.title or "").lower()
+            company = (job.company or "").lower()
+            key = (title, company) if (title or company) else job_id
+            if key and key in seen_keys:
+                continue
+            if key:
+                seen_keys.add(key)
+            deduped_jobs.append(job)
+
         return deduped_jobs
     
     # Tool implementations
@@ -74,25 +81,13 @@ class ToolRegistry:
         if not self.db:
             return []
 
-        # Resolve defaults from user config when not specified explicitly.
+        # Resolve default source from user config when not specified explicitly.
         config = get_user_config()
         if not source:
             source = config.sources.enabled[0] if config.sources.enabled else "greenhouse"
-        if not company:
-            companies = config.companies_for(source)
-            company = companies[0] if companies else ""
 
         try:
-            # LinkedIn needs credentials (env overridable); other sources are
-            # API-key-less by default (greenhouse/lever/ashby accept None).
-            if source.lower() == 'linkedin':
-                adapter = get_source_adapter(
-                    source,
-                    email=config.linkedin.email or os.environ.get('LINKEDIN_EMAIL'),
-                    password=config.linkedin.password or os.environ.get('LINKEDIN_PASSWORD'),
-                )
-            else:
-                adapter = get_source_adapter(source)
+            adapter = get_source_adapter(source)
 
             if company:
                 jobs = adapter.get_jobs(company, limit, raise_errors=raise_errors)

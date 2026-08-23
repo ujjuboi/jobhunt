@@ -17,7 +17,7 @@ from ...config.user_config import (
 
 
 class SettingsScreen(BaseScreen):
-    """Settings screen for configuration (sources, companies, model, scoring)."""
+    """Settings screen for configuration (sources, model, scoring)."""
 
     def __init__(self):
         super().__init__(name="settings")
@@ -35,8 +35,6 @@ class SettingsScreen(BaseScreen):
                 Static("Application Settings:", classes="section_title"),
                 Static("Enabled sources (comma-separated):"),
                 Input(placeholder="greenhouse, lever, ashby", id="sources_input"),
-                Static("Company slugs (comma-separated, per enabled source):"),
-                Input(placeholder="stripe, ramp", id="companies_input"),
                 Static("Chat model:"),
                 Input(placeholder="Qwen3-30B-A3B-6bit", id="model_input"),
                 Static("Scoring mode:"),
@@ -53,10 +51,7 @@ class SettingsScreen(BaseScreen):
             ),
             Vertical(
                 Static("LinkedIn login:", classes="section_title"),
-                Static("Email (LINKEDIN_EMAIL):"),
-                Input(placeholder="you@example.com", id="linkedin_email"),
-                Static("Password (LINKEDIN_PASSWORD):"),
-                Input(placeholder="secret", id="linkedin_password", password=True),
+                Static("Sign in through the browser once; the session is reused from cache."),
                 Button("Login to LinkedIn", id="linkedin_login_btn"),
                 Static("", id="linkedin_status"),
                 id="linkedin_block",
@@ -80,16 +75,9 @@ class SettingsScreen(BaseScreen):
         sources = self.query_one("#sources_input", Input)
         sources.value = ", ".join(config.sources.enabled)
 
-        companies = []
-        for source in config.sources.enabled:
-            companies.extend(config.companies_for(source))
-        self.query_one("#companies_input", Input).value = ", ".join(companies)
-
         self.query_one("#model_input", Input).value = config.model.chat
         self.query_one("#score_mode_select", Select).value = config.scoring.mode
         self.query_one("#system_prompt", TextArea).text = config.prompts.system
-        self.query_one("#linkedin_email", Input).value = config.linkedin.email
-        self.query_one("#linkedin_password", Input).value = config.linkedin.password
         self._toggle_linkedin_block()
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -113,9 +101,7 @@ class SettingsScreen(BaseScreen):
             self._login_linkedin()
 
     def _login_linkedin(self) -> None:
-        """Kick off a one-time LinkedIn login in the background."""
-        # Persist credentials before launching so they survive an aborted login.
-        self._save_config()
+        """Kick off a one-time LinkedIn browser login in the background."""
         status = self.query_one("#linkedin_status", Static)
         status.update("Launching browser for LinkedIn login...")
         self.query_one("#linkedin_login_btn", Button).disabled = True
@@ -124,21 +110,19 @@ class SettingsScreen(BaseScreen):
     async def _async_linkedin_login(self) -> None:
         status = self.query_one("#linkedin_status", Static)
         try:
-            email = self.query_one("#linkedin_email", Input).value.strip()
-            password = self.query_one("#linkedin_password", Input).value
-            await asyncio.to_thread(self._linkedin_login_blocking, email, password)
+            await asyncio.to_thread(self._linkedin_login_blocking)
             status.update("LinkedIn logged in. Session saved for headless reuse.")
         except Exception as e:
             status.update(f"LinkedIn login failed: {e}")
         finally:
             self.query_one("#linkedin_login_btn", Button).disabled = False
 
-    def _linkedin_login_blocking(self, email: str, password: str) -> bool:
+    def _linkedin_login_blocking(self) -> bool:
         """Blocking Playwright login, run off the event loop."""
         from ...sources.linkedin import LinkedInAdapter
 
-        adapter = LinkedInAdapter(email=email, password=password)
-        adapter.login(email=email, password=password)
+        adapter = LinkedInAdapter()
+        adapter.login()
         return True
 
     def _save_config(self) -> None:
@@ -154,37 +138,16 @@ class SettingsScreen(BaseScreen):
             if s in ALLOWED_SOURCES and s not in sources:
                 sources.append(s)
 
-        companies_raw = _clean(self.query_one("#companies_input", Input).value)
-        companies = [c.strip() for c in companies_raw.split(",") if c.strip()]
-
         model = self.query_one("#model_input", Input).value.strip()
         mode = str(self.query_one("#score_mode_select", Select).value)
         system_prompt = self.query_one("#system_prompt", TextArea).text
 
         config = load_user_config()
         config.sources.enabled = sources or config.sources.enabled
-        # Handle companies per source instead of just the first source
-        if companies and config.sources.enabled:
-            companies_by_source = {}
-            # Distribute companies across enabled sources in a round-robin fashion
-            for i, company in enumerate(companies):
-                source = config.sources.enabled[i % len(config.sources.enabled)]
-                if source not in companies_by_source:
-                    companies_by_source[source] = []
-                companies_by_source[source].append(company)
-            config.sources.companies = companies_by_source
-        elif config.sources.enabled:
-            # If no companies were provided but sources are enabled, keep current companies
-            pass
-        else:
-            # Clear companies if no sources are enabled
-            config.sources.companies = {}
         if model:
             config.model.chat = model
         config.scoring.mode = mode
         config.prompts.system = system_prompt
-        config.linkedin.email = self.query_one("#linkedin_email", Input).value.strip()
-        config.linkedin.password = self.query_one("#linkedin_password", Input).value
 
         try:
             path = save_user_config(config)

@@ -82,3 +82,6 @@ outputs/
 
 # Configuration
 config.toml
+
+# Cached sessions (LinkedIn cookies etc.)
+cache/

@@ -69,15 +69,12 @@ The app reads a user config from `~/.config/jobhunt/config.toml`
 (`JOBHUNT_CONFIG` overrides the path). If absent, sensible defaults are used and
 a file is created when you **Save Config** from the Settings screen.
 
-The Settings screen edits the active sources, target company slugs, chat model,
+The Settings screen edits the active sources, chat model,
 scoring mode, and the system prompt. You can also edit the TOML by hand:
 
 ```toml
 [sources]
 enabled = ["greenhouse", "lever", "ashby"]
-
-[sources.companies]
-greenhouse = ["stripe"]
 
 [prompts]
 system = "You are a helpful job-hunting assistant."

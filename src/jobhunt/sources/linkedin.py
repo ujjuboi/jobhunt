@@ -25,23 +25,21 @@ CACHE_DIR = Path(__file__).resolve().parents[3] / "cache"
 class LinkedInAdapter(SourceAdapter):
     """Adapter for scraping LinkedIn job listings using Playwright"""
 
-    def __init__(self, email: str, password: str, session_file: Optional[str] = None):
-        self.email = email
-        self.password = password
+    def __init__(self, session_file: Optional[str] = None):
         self.base_url = "https://www.linkedin.com"
         self.browser = None
         self.context = None
         self.page = None
         self.playwright = None
-        # Persisted session (cookie jar): credentials are only used for the
-        # first headful login; later runs reuse the saved storage state.
+        # Persisted session (cookie jar): the user signs in once through a
+        # browser; later runs reuse the saved storage state.
         self.session_file = (
             os.path.abspath(session_file)
             if session_file
             else str(CACHE_DIR / "linkedin_session.json")
         )
 
-    def _setup_browser(self, headless: Optional[bool] = None, auto_login: bool = True):
+    def _setup_browser(self, headless: Optional[bool] = None):
         """Initialize the browser, restoring a persisted session if present."""
         if self.browser:
             return
@@ -54,32 +52,21 @@ class LinkedInAdapter(SourceAdapter):
             storage_state=self.session_file if has_session else None
         )
         self.page = self.context.new_page()
-        if auto_login and not has_session and self.email and self.password:
-            self._login()
+        self.page.set_default_timeout(60000)
 
-    def login(self, email: str = "", password: str = "") -> bool:
+    def login(self) -> bool:
         """Perform a one-time interactive LinkedIn login.
 
-        Launches a headful browser, pre-fills the given credentials when
-        provided, and waits for the user to finish any verification step
-        (including 2FA). The signed-in session is persisted to the local
-        cache so later runs reuse it headlessly. Returns True on success and
-        raises on failure.
+        Launches a headful browser and lets the user sign in (including any
+        2FA/verification step) without storing credentials. The signed-in
+        session is persisted to the local cache so later runs reuse it
+        headlessly. Returns True on success and raises on failure.
         """
-        if email:
-            self.email = email
-        if password:
-            self.password = password
         try:
-            self._setup_browser(headless=False, auto_login=False)
+            self._setup_browser(headless=False)
             self.page.goto(f"{self.base_url}/login")
-            if self.email:
-                self.page.fill("#username", self.email)
-            if self.password:
-                self.page.fill("#password", self.password)
-            self.page.click("button[type='submit']")
             # Wait for the user (and any 2FA/verify step) to finish signing in.
-            self.page.wait_for_url("**/feed/**", timeout=120000)
+            self.page.wait_for_url("**/feed/**", timeout=300000)
             Path(self.session_file).parent.mkdir(parents=True, exist_ok=True)
             self.context.storage_state(path=self.session_file)
             return True
@@ -88,16 +75,6 @@ class LinkedInAdapter(SourceAdapter):
             raise
         finally:
             self._close_browser()
-
-    def _login(self):
-        """Headful login; persists the session cookie jar for later reuse."""
-        self.page.goto(f"{self.base_url}/login")
-        self.page.fill("#username", self.email)
-        self.page.fill("#password", self.password)
-        self.page.click("button[type='submit']")
-        self.page.wait_for_url("**/feed/**", timeout=60000)
-        Path(self.session_file).parent.mkdir(parents=True, exist_ok=True)
-        self.context.storage_state(path=self.session_file)
 
     def _close_browser(self):
         """Close the browser and the underlying Playwright driver."""
@@ -141,19 +118,19 @@ class LinkedInAdapter(SourceAdapter):
             self.page.wait_for_timeout(3000)
 
             jobs = []
-            cards = self.page.query_selector_all("li.job-search-results__list-item")
+            cards = self.page.query_selector_all("div.job-card-container")
             for card in cards[:limit]:
                 try:
-                    title_el = card.query_selector(".job-card-list__title")
+                    title_el = card.query_selector("a.job-card-container__link")
                     title = title_el.inner_text() if title_el else ""
 
-                    company_el = card.query_selector(".job-card-container__company-name")
+                    company_el = card.query_selector(".artdeco-entity-lockup__subtitle")
                     company = company_el.inner_text() if company_el else ""
 
-                    location_el = card.query_selector(".job-card-container__metadata-item")
+                    location_el = card.query_selector(".job-card-container__metadata-wrapper li")
                     location = location_el.inner_text() if location_el else ""
 
-                    url_el = card.query_selector("a.job-card-list__title")
+                    url_el = title_el
                     url = url_el.get_attribute("href") if url_el else ""
                     if url and not url.startswith("http"):
                         url = f"{self.base_url}{url}"
@@ -162,7 +139,7 @@ class LinkedInAdapter(SourceAdapter):
                         continue
 
                     jobs.append(self.normalize_job({
-                        "id": self._extract_job_id(url),
+                        "id": card.get_attribute("data-job-id") or self._extract_job_id(url),
                         "title": title,
                         "company": company,
                         "location": location,

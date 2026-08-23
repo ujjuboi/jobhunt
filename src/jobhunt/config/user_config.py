@@ -61,16 +61,6 @@ class ScoringConfig(BaseModel):
     mode: str = "hybrid"
 
 
-class LinkedInConfig(BaseModel):
-    """LinkedIn credentials used for the one-time browser login.
-
-    Stored as-is in the user config (env LINKEDIN_EMAIL / LINKEDIN_PASSWORD
-    remain as an override / fallback).
-    """
-    email: str = ""
-    password: str = ""
-
-
 class UserConfig(BaseModel):
     """Validated user configuration.
 
@@ -80,7 +70,6 @@ class UserConfig(BaseModel):
     prompts: PromptConfig = Field(default_factory=PromptConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
-    linkedin: LinkedInConfig = Field(default_factory=LinkedInConfig)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -184,11 +173,6 @@ def _to_toml(config: UserConfig) -> str:
     lines.append("")
     lines.append("[scoring]")
     lines.append(f'mode = {_quote(config.scoring.mode)}')
-
-    lines.append("")
-    lines.append("[linkedin]")
-    lines.append(f'email = {_quote(config.linkedin.email)}')
-    lines.append(f'password = {_quote(config.linkedin.password)}')
 
     return "\n".join(lines) + "\n"
 
