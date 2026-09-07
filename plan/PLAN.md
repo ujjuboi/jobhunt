@@ -8,7 +8,7 @@ I submit** — the app prepares materials, the user applies manually.
 
 ## 2. Environment (verified)
 - macOS 26.5.2 · Apple Silicon (arm64) · 64GB RAM · Homebrew (`/opt/homebrew/bin/brew`) present.
-- oMLX server running on `127.0.0.1:8000`, API key `4526` (read from `~/.omlx/settings.json` at
+- oMLX server running on `127.0.0.1:8000`, API key read from `~/.omlx/settings.json` at
   runtime, overridable via `OMLX_API_KEY`). Never hardcoded in the repo.
 - Models installed (auto-detected by oMLX):
   - `Qwen3-30B-A3B-6bit` — primary agent brain (max_model_len 40960)
