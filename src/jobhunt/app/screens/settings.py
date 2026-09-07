@@ -36,7 +36,7 @@ class SettingsScreen(BaseScreen):
                 Static("Enabled sources (comma-separated):"),
                 Input(placeholder="greenhouse, lever, ashby", id="sources_input"),
                 Static("Chat model:"),
-                Input(placeholder="Qwen3-30B-A3B-6bit", id="model_input"),
+                Input(placeholder="gemma-4-e4b-bf16", id="model_input"),
                 Static("Scoring mode:"),
                 Select(
                     options=[

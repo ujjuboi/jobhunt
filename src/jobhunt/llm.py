@@ -30,7 +30,7 @@ try:
 except ImportError:
     pass
 
-DEFAULT_CHAT_MODEL = "Qwen3-30B-A3B-6bit"
+DEFAULT_CHAT_MODEL = "gemma-4-e4b-bf16"
 DEFAULT_EMBEDDING_MODEL = "bge-m3-mlx-fp16"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
