@@ -258,7 +258,7 @@ def test_linkedin_session_email_resolves_from_me_payload(monkeypatch, tmp_path):
             return '{"emailAddress": "me@example.com"}'
 
     class FakeRequest:
-        def get(self, url, headers=None):
+        def get(self, url, headers=None, timeout=None):
             return FakeResponse()
 
     class FakePage:

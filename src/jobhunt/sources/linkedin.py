@@ -103,6 +103,10 @@ class LinkedInAdapter(SourceAdapter):
             return None
         try:
             self._setup_browser()
+            # Best-effort resolution: bound the delay so a hung page or API
+            # call cannot stall the background worker for the full browser
+            # timeout (the 60s default is meant for live scraping).
+            self.page.set_default_timeout(15000)
             email = self._email_from_me_payload()
             if email is None:
                 email = self._email_from_account_settings()
@@ -135,6 +139,7 @@ class LinkedInAdapter(SourceAdapter):
             response = self.context.request.get(
                 f"{self.base_url}/voyager/api/me",
                 headers={"csrf-token": self._csrf_token()},
+                timeout=15000,
             )
             if not response.ok:
                 return None

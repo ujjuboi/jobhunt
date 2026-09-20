@@ -32,8 +32,11 @@ class SettingsScreen(BaseScreen):
 
     def __init__(self, database=None) -> None:
         super().__init__(name="settings", database=database)
-        #: Cached signed-in email (None until resolved for the current session).
-        self._linkedin_email: Optional[str] = None
+        #: (session mtime, resolved email) tuple. Caching the resolution
+        #: against the session file's mtime means failed lookups are not
+        #: retried on every resume, and a freshly saved session (a new
+        #: login) invalidates the cache.
+        self._linkedin_resolution: Optional[tuple[float, Optional[str]]] = None
 
     def _get_content(self):
         """Compose the settings body.
@@ -114,12 +117,18 @@ class SettingsScreen(BaseScreen):
             self._toggle_linkedin_block()
 
     def _toggle_linkedin_block(self) -> None:
-        """Display the LinkedIn login block only when linkedin is a source."""
+        """Display the LinkedIn login block only when linkedin is a source.
+
+        Also disables the login button while the block is hidden, so the
+        login flow (whose status lives inside the hidden block) can never
+        be started without visible feedback.
+        """
         sources_value = self.query_one("#sources_input", Input).value.lower()
         show = "linkedin" in sources_value
         self.query_one("#linkedin_block").display = "block" if show else "none"
+        self.query_one("#linkedin_login_btn", Button).disabled = not show
         if show:
-            self._refresh_linkedin_status(interactive=True)
+            self._refresh_linkedin_status()
         else:
             self._set_linkedin_status("")
 
@@ -164,11 +173,24 @@ class SettingsScreen(BaseScreen):
         self._run_worker(self._async_linkedin_login, "linkedin")
 
     async def _async_linkedin_login(self) -> None:
-        """Run the blocking LinkedIn login off the event loop."""
+        """Run the blocking LinkedIn login off the event loop.
+
+        Waits for an in-flight status resolution to finish first so the
+        interactive login never runs two browsers at once, and only resolves
+        the account email when the LinkedIn block is actually shown.
+        """
         try:
+            while self._is_busy("linkedin-status"):
+                await asyncio.sleep(0.2)
             await asyncio.to_thread(self._linkedin_login_blocking)
+            if not self._linkedin_block_shown():
+                self._set_linkedin_status(
+                    "LinkedIn logged in. Session saved for headless reuse.",
+                    "signed_in",
+                )
+                return
             email = await asyncio.to_thread(self._linkedin_session_email_blocking)
-            self._linkedin_email = email
+            self._set_linkedin_resolution(email)
             if email:
                 self._set_linkedin_status(
                     f"Signed in as {email}. Session saved for headless reuse.",
@@ -182,7 +204,9 @@ class SettingsScreen(BaseScreen):
         except Exception as error:
             self._set_linkedin_status(f"LinkedIn login failed: {error}", "signed_out")
         finally:
-            self.query_one("#linkedin_login_btn", Button).disabled = False
+            self.query_one("#linkedin_login_btn", Button).disabled = (
+                not self._linkedin_block_shown()
+            )
 
     def _linkedin_login_blocking(self) -> bool:
         """Blocking Playwright login, run off the event loop.
@@ -196,19 +220,15 @@ class SettingsScreen(BaseScreen):
         adapter.login()
         return True
 
-    def _refresh_linkedin_status(self, interactive: bool = False) -> None:
+    def _refresh_linkedin_status(self) -> None:
         """Reflect the current LinkedIn sign-in state in the status line.
 
         Shows "Not signed in" when no persisted session exists; otherwise
         resolves the account email in the background so the block reads, e.g.,
-        "Signed in as user@example.com". Skipped while a login or an earlier
-        lookup is still running. ``interactive`` (typing in the sources input)
-        only performs the cheap session-file check and leaves the browser
-        lookup to mount, resume, or the login flow itself.
-
-        Args:
-            interactive: True when triggered by input editing, in which case
-                the email-resolving worker is not started.
+        "Signed in as user@example.com". The resolved value is cached against
+        the session file's mtime: a failed lookup is not retried on every
+        resume, and a freshly saved session (a new login) invalidates the
+        cache. Skipped while a login or an earlier lookup is still running.
         """
         if self._is_busy("linkedin") or self._is_busy("linkedin-status"):
             return
@@ -216,20 +236,17 @@ class SettingsScreen(BaseScreen):
 
         session_file = getattr(LinkedInAdapter(), "session_file", None)
         if not session_file or not os.path.exists(session_file):
-            self._linkedin_email = None
+            self._linkedin_resolution = None
             self._set_linkedin_status(
                 "Not signed in. Sign in once to enable LinkedIn browsing.",
                 "signed_out",
             )
             return
-        if self._linkedin_email is not None:
-            self._set_linkedin_status(
-                f"Signed in as {self._linkedin_email}.", "signed_in"
-            )
+        cached = self._linkedin_resolution
+        if cached is not None and cached[0] == os.path.getmtime(session_file):
+            self._apply_linkedin_email(cached[1])
             return
         self._set_linkedin_status("Signed in — resolving account email…")
-        if interactive:
-            return
         self._run_worker(self._async_refresh_linkedin_status, "linkedin-status")
 
     async def _async_refresh_linkedin_status(self) -> None:
@@ -262,7 +279,7 @@ class SettingsScreen(BaseScreen):
         Args:
             email: The resolved account email, or ``None`` when unavailable.
         """
-        self._linkedin_email = email
+        self._set_linkedin_resolution(email)
         current = str(self.query_one("#linkedin_status", StatusText).content).strip()
         if current and current != "Signed in — resolving account email…":
             return
@@ -270,6 +287,40 @@ class SettingsScreen(BaseScreen):
             self._set_linkedin_status(f"Signed in as {email}.", "signed_in")
         else:
             self._set_linkedin_status("Signed in — account email unavailable.")
+
+    def _set_linkedin_resolution(self, email: Optional[str]) -> None:
+        """Cache the resolved email against the current session file mtime.
+
+        A ``None`` email is cached just like a successful one so a failed
+        lookup is not retried on every resume while the session is unchanged.
+
+        Args:
+            email: The resolved account email, or ``None`` when unavailable.
+        """
+        mtime = self._linkedin_session_mtime()
+        self._linkedin_resolution = (mtime, email) if mtime is not None else None
+
+    def _linkedin_session_mtime(self) -> Optional[float]:
+        """Return the LinkedIn session file mtime, or None when absent.
+
+        Returns:
+            The session file's modification time, or ``None`` when the
+            adapter exposes no session file or it does not exist.
+        """
+        from ...sources.linkedin import LinkedInAdapter
+
+        session_file = getattr(LinkedInAdapter(), "session_file", None)
+        if not session_file or not os.path.exists(session_file):
+            return None
+        return os.path.getmtime(session_file)
+
+    def _linkedin_block_shown(self) -> bool:
+        """Return True when the LinkedIn login block is currently displayed.
+
+        Returns:
+            True when the ``#linkedin_block`` widget is currently visible.
+        """
+        return bool(self.query_one("#linkedin_block").display)
 
     def _save_config(self) -> None:
         """Validate the form and write it to the user config TOML."""
