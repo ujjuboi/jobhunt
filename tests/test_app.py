@@ -3,7 +3,7 @@ Phase 1 tests: app mount, navigation, tool registry, lazy config.
 """
 import asyncio
 
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 from jobhunt.app import JobHuntApp
 from jobhunt.app import components as components_module
@@ -288,5 +288,24 @@ def test_commands_provider_preserves_order():
             assert hits[1].text == "Theme"
             assert hits[2].text == "Screenshot"
             assert hits[3].text == "Quit"
+
+    asyncio.run(run())
+
+
+def test_chat_input_has_visible_placeholder():
+    """Chat input must show a visible placeholder styled with $primary + italic."""
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_btn")
+            await asyncio.sleep(0.1)
+            assert isinstance(app.screen, ChatScreen)
+            chat_input = app.screen.query_one("#chat_input", Input)
+            assert chat_input.placeholder == "Type your message..."
+            placeholder_style = chat_input.get_component_rich_style("input--placeholder")
+            assert placeholder_style.color is not None
+            assert placeholder_style.italic is True
 
     asyncio.run(run())
