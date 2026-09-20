@@ -1,8 +1,8 @@
 """
 Indeed job board adapter using Playwright.
 
-ToS-aware, opt-in scraping. See plan/PLAN.md Phase 5 for the intended
-feature-flag and cookie-jar/session design.
+ToS-aware, opt-in scraping. See docs/SOURCES.md for the source adapter
+design, Playwright integration, and session persistence.
 """
 import logging
 import re

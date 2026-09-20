@@ -1,9 +1,9 @@
 """
 LinkedIn job board adapter using Playwright.
 
-Implements the Phase 5 plan: persisted session cookie jar (headful first
-login, headless afterwards with the saved storage state), polite delays,
-and ToS-aware. Intended to be feature-flagged / opt-in.
+Playwright-based LinkedIn scraper with session persistence: headful first
+login followed by headless reuse of the saved session. Polite delays
+between requests. ToS-aware and opt-in (feature-flagged).
 """
 import logging
 import os
