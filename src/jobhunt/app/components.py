@@ -206,14 +206,17 @@ class WorkerMixin:
             for worker in self.workers
         )
 
-    def _run_worker(self, coro, group: str) -> None:
+    def _run_worker(self, coro, group: str):
         """Start an exclusive worker for ``coro`` in the given group.
 
         Args:
             coro: The coroutine to run in the background.
             group: The worker group name (exclusive within that group).
+
+        Returns:
+            The started :class:`~textual.worker.Worker` instance.
         """
-        self.run_worker(coro, group=group, exclusive=True)
+        return self.run_worker(coro, group=group, exclusive=True)
 
     def _list_jobs(self):
         """Blocking job listing helper, run off the event loop.

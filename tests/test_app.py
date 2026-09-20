@@ -138,7 +138,7 @@ def test_chat_round_trip(monkeypatch):
                     break
             await asyncio.sleep(0.2)
             assert fake.calls == 1
-            transcript = app.screen.query_one("#chat_messages").text
+            transcript = app.screen.transcript
             assert "You:" in transcript
             assert "canned reply" in transcript
 
@@ -164,7 +164,7 @@ def test_chat_surfaces_agent_error(monkeypatch):
                 if fake.calls:
                     break
             await asyncio.sleep(0.2)
-            assert "Error:" in app.screen.query_one("#chat_messages").text
+            assert "Error:" in app.screen.transcript
 
     asyncio.run(run())
 

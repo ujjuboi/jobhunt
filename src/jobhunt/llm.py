@@ -166,13 +166,23 @@ def complete(messages: List[Dict[str, str]], model: Optional[str] = None, **kwar
     ``model`` defaults to the resolved chat model. Any OpenAI kwargs
     (temperature, response_format, ...) are forwarded.
     """
+    resolved_model = model or get_default_model("chat")
+    logger.info(
+        "LLM complete request: model=%s messages=%d",
+        resolved_model, len(messages),
+    )
     client = _build_client()
     response = client.chat.completions.create(
-        model=model or get_default_model("chat"),
+        model=resolved_model,
         messages=messages,
         **kwargs,
     )
-    return response.choices[0].message.content or ""
+    reply = response.choices[0].message.content or ""
+    logger.info(
+        "LLM complete done: model=%s chars=%d preview=%r",
+        resolved_model, len(reply), reply[:120],
+    )
+    return reply
 
 
 def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs: Any) -> Iterator[str]:
@@ -181,14 +191,20 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
     Transient errors (connection drop, 5xx, 429) restart the stream; the caller
     sees an uninterrupted sequence of deltas. Non-transient errors propagate.
     """
+    resolved_model = model or get_default_model("chat")
+    logger.info(
+        "LLM stream request: model=%s messages=%d",
+        resolved_model, len(messages),
+    )
     attempts = 0
     # Keep track of what's already been yielded to avoid duplication on restart
     seen_content = ""
+    yield_count = 0
     while True:
         try:
             client = _build_client()
             response = client.chat.completions.create(
-                model=model or get_default_model("chat"),
+                model=resolved_model,
                 messages=messages,
                 stream=True,
                 **kwargs,
@@ -203,13 +219,26 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
                             content_to_yield = content_to_yield[len(seen_content):]
                         if content_to_yield:
                             seen_content += content_to_yield
+                            yield_count = yield_count + 1
+                            logger.debug(
+                                "LLM stream chunk %d: %r",
+                                yield_count, content_to_yield[:80],
+                            )
                             yield content_to_yield
+            logger.info(
+                "LLM stream done: model=%s chunks=%d chars=%d",
+                resolved_model, yield_count, len(seen_content),
+            )
             return
         except Exception as error:
             status = getattr(error, "status_code", None)
             if status is None:
                 status = getattr(error, "status", None)
             if attempts >= 3 or not is_transient_error(status, error):
+                logger.warning(
+                    "LLM stream failed after %d chunks: %s",
+                    yield_count, error,
+                )
                 raise
             attempts += 1
             delay = 0.5 * (2 ** (attempts - 1)) + random.uniform(0, 0.1)
