@@ -6,7 +6,7 @@ import asyncio
 from textual.widgets import Static
 
 from jobhunt.app import JobHuntApp
-from jobhunt.app.screens import chat as chat_module
+from jobhunt.app import components as components_module
 from jobhunt.app.screens.chat import ChatScreen
 from jobhunt.app.screens.dashboard import DashboardScreen
 from jobhunt.agent import ToolRegistry
@@ -39,19 +39,32 @@ def test_nav_switches_screen():
     asyncio.run(run())
 
 
-def test_fit_screen_analyze_without_profile_guides_user():
+def test_fit_screen_analyze_without_profile_guides_user(tmp_path):
     """Fit screen with an empty DB must explain that a profile is needed."""
 
     async def run():
         app = JobHuntApp()
+        # Use an isolated empty DB so the score table stays small enough for
+        # the Analyze button to remain on-screen in the test terminal.
+        app.database = JobHuntDB(str(tmp_path / "empty.db"))
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
             await pilot.click("#fit_btn")
             await asyncio.sleep(0.1)
             from jobhunt.app.screens.fit import FitScreen
             assert isinstance(app.screen, FitScreen)
+            # Let the mount-time job-load settle so its deferred status write
+            # cannot race the Analyze click below.
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                status = str(app.screen.query_one("#fit_status").content).lower()
+                if "no jobs" in status or status.startswith("error loading jobs"):
+                    break
             await pilot.click("#analyze_button")
-            await asyncio.sleep(0.1)
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "no profile" in str(app.screen.query_one("#fit_status").content):
+                    break
             status = app.screen.query_one("#fit_status").content
             assert "profile" in str(status).lower()
 
@@ -110,7 +123,7 @@ def test_chat_round_trip(monkeypatch):
 
     async def run():
         fake = FakeAgent()
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
@@ -137,7 +150,7 @@ def test_chat_surfaces_agent_error(monkeypatch):
 
     async def run():
         fake = FakeAgent(error=RuntimeError("oMLX down"))
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)

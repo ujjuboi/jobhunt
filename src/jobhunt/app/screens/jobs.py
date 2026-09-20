@@ -1,125 +1,144 @@
 """
-Jobs screen for JobHunt application
+Jobs screen for the JobHunt TUI.
+
+Lists saved jobs in a data table, reloads on mount/resume/refresh, and lets
+the user select a row to remember the chosen job for later screens.
 """
 import asyncio
 from typing import Optional
 
-from textual.widgets import Static, Button, DataTable
 from textual.containers import Container
+from textual.widgets import Button, DataTable
 
-from .base import BaseScreen
-from ...agent import JobHuntAgent
 from ...db import JobHuntDB
+from ..components import ActionButton, StatusText
+from .base import BaseScreen
 
 
 class JobsScreen(BaseScreen):
-    """Jobs screen showing job listings"""
-    
-    def __init__(self, db: Optional[JobHuntDB] = None):
-        super().__init__(name="jobs")
-        self.db = db
-        self.agent: Optional[JobHuntAgent] = None
-        
+    """Screen showing the saved job listings in a table."""
+
+    def __init__(self, database: Optional[JobHuntDB] = None) -> None:
+        super().__init__(name="jobs", database=database)
+
     def _get_content(self):
+        """Compose the jobs body.
+
+        Returns:
+            A container with the page title, the jobs table, a status line,
+            and a refresh button (widget ids preserved for compatibility).
+        """
         return Container(
-            Static("Job Listings", id="jobs_title"),
+            self._title("Job Listings", id="jobs_title"),
             DataTable(id="jobs_table"),
-            Static("", id="jobs_status"),
-            Button("Refresh", id="refresh_button"),
+            self._status("", id="jobs_status"),
+            ActionButton("Refresh", id="refresh_button"),
             id="jobs_content"
         )
-    
-    def on_mount(self):
-        """Initialize the screen when mounted"""
+
+    def on_mount(self) -> None:
+        """Initialize the screen when mounted."""
         self._load_jobs()
 
-    def on_screen_resume(self):
+    def on_screen_resume(self) -> None:
         """Reload jobs whenever the user returns to this screen."""
         if self.is_mounted:
             self._load_jobs()
 
-    def on_button_pressed(self, event: Button.Pressed):
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle the refresh button.
+
+        Args:
+            event: The button-pressed event; only ``refresh_button`` is
+                handled, everything else is delegated to the base.
+        """
         super().on_button_pressed(event)
         if event.button.id == "refresh_button":
             self._load_jobs()
-        
-    def on_data_table_row_selected(self, event):
-        """Handle row selection events"""
+
+    def on_data_table_row_selected(self, event) -> None:
+        """Handle row selection events.
+
+        Args:
+            event: The row-selected event; stores the job id on the app and
+                reflects the selection in the status line.
+        """
         if event.row_key is not None:
             job_id = event.row_key.value
             self.app.selected_job_id = job_id
             # Get the job details for display
-            if self.db is not None:
-                job = self.db.get_job(job_id)
-                if job:
-                    status_text = f"Selected: {job.title}"
-                    self.query_one("#jobs_status").update(status_text)
+            if self.database is not None:
+                job_entry = self.database.get_job(job_id)
+                if job_entry:
+                    status_text = f"Selected: {job_entry.title}"
                 else:
-                    self.query_one("#jobs_status").update(f"Selected job ID: {job_id}")
+                    status_text = f"Selected job ID: {job_id}"
             else:
-                self.query_one("#jobs_status").update(f"Selected job ID: {job_id}")
-    
-    def _load_jobs(self):
-        """Load jobs into the table"""
-        # Load jobs from database in background to prevent UI freezing
-        self.run_worker(self._async_load_jobs, group="jobs", exclusive=True)
-    
-    async def _async_load_jobs(self):
-        """Load jobs asynchronously"""
+                status_text = f"Selected job ID: {job_id}"
+            self.query_one("#jobs_status", StatusText).set_message(status_text)
+
+    def _load_jobs(self) -> None:
+        """Load jobs into the table without freezing the UI."""
+        self._run_worker(self._async_load_jobs, "jobs")
+
+    async def _async_load_jobs(self) -> None:
+        """Run the job load off the event loop and re-render the table."""
         try:
             # Get jobs using the agent's list_jobs tool (off the event loop)
             jobs = await asyncio.to_thread(self._list_jobs)
-            
+
             # Update UI with job data
             self.call_after_refresh(self._update_jobs_table, jobs)
-            
-        except Exception as e:
+
+        except Exception as error:
             # Handle errors by updating with error message
-            self.call_after_refresh(self._show_jobs_error, f"Error loading jobs: {e}")
+            self.call_after_refresh(self._show_jobs_error, f"Error loading jobs: {error}")
 
-    def _list_jobs(self):
-        """Blocking job listing helper, run off the event loop."""
-        if self.agent is None:
-            self.agent = JobHuntAgent(self.db)
-        return self.agent.run_tool("list_jobs")
+    def _show_jobs_error(self, message: str) -> None:
+        """Display an error message in the jobs table.
 
-    def _show_jobs_error(self, message: str):
-        """Display an error message in the jobs table."""
-        table = self.query_one("#jobs_table", DataTable)
-        table.clear(columns=True)
-        table.add_column("Error", key="error", width=40)
-        table.add_row(message)
-    
-    def _update_jobs_table(self, jobs):
-        """Update the jobs table with loaded data"""
+        Args:
+            message: The error text to render in place of the table body.
+        """
+        data_table = self.query_one("#jobs_table", DataTable)
+        data_table.clear(columns=True)
+        data_table.add_column("Error", key="error", width=40)
+        data_table.add_row(message)
+
+    def _update_jobs_table(self, jobs) -> None:
+        """Update the jobs table with the loaded data.
+
+        Args:
+            jobs: The job objects to render (up to the first 20).
+        """
         # Clear existing table data (including columns for a clean re-render)
-        table = self.query_one("#jobs_table", DataTable)
-        table.clear(columns=True)
+        data_table = self.query_one("#jobs_table", DataTable)
+        data_table.clear(columns=True)
 
         if not jobs:
-            table.add_column("Message", key="message", width=40)
-            table.add_row("No jobs found. Run a search first, then Refresh.")
-            self.query_one("#jobs_status").update("0 jobs in database")
+            data_table.add_column("Message", key="message", width=40)
+            data_table.add_row("No jobs found. Run a search first, then Refresh.")
+            self.query_one("#jobs_status", StatusText).set_message("0 jobs in database")
             return
 
         # Add columns
-        table.add_column("ID", key="id", width=10)
-        table.add_column("Title", key="title", width=30)
-        table.add_column("Company", key="company", width=20)
-        table.add_column("Location", key="location", width=15)
-        table.add_column("Date", key="date", width=15)
-        
+        data_table.add_column("ID", key="id", width=10)
+        data_table.add_column("Title", key="title", width=30)
+        data_table.add_column("Company", key="company", width=20)
+        data_table.add_column("Location", key="location", width=15)
+        data_table.add_column("Date", key="date", width=15)
+
         # Add rows from jobs
-        for job in jobs[:20]:  # Show top 20 jobs
-            table.add_row(
-                job.id[:10] + "..." if len(job.id) > 10 else job.id,
-                job.title[:30] + "..." if len(job.title) > 30 else job.title,
-                job.company[:20] + "..." if len(job.company) > 20 else job.company,
-                job.location or "N/A",
-                job.posted_date.strftime("%Y-%m-%d") if job.posted_date else "N/A",
-                key=job.id  # Add job ID as key for row selection
+        for job_entry in jobs[:20]:  # Show top 20 jobs
+            data_table.add_row(
+                job_entry.id[:10] + "..." if len(job_entry.id) > 10 else job_entry.id,
+                job_entry.title[:30] + "..." if len(job_entry.title) > 30 else job_entry.title,
+                job_entry.company[:20] + "..." if len(job_entry.company) > 20 else job_entry.company,
+                job_entry.location or "N/A",
+                job_entry.posted_date.strftime("%Y-%m-%d") if job_entry.posted_date else "N/A",
+                key=job_entry.id  # Add job ID as key for row selection
             )
-        total = self.db.count_jobs() if self.db else len(jobs)
-        self.query_one("#jobs_status").update(
+        total = self.database.count_jobs() if self.database else len(jobs)
+        self.query_one("#jobs_status", StatusText).set_message(
             f"Showing {min(len(jobs), 20)} of {total} jobs"
         )

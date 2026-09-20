@@ -52,8 +52,8 @@ class GreenhouseAdapter(SourceAdapter):
                     
             return jobs
             
-        except Exception as e:
-            logger.warning(f"Error fetching jobs from Greenhouse: {e}")
+        except Exception as error:
+            logger.warning(f"Error fetching jobs from Greenhouse: {error}")
             if raise_errors:
                 raise
             return []
@@ -83,8 +83,8 @@ class GreenhouseAdapter(SourceAdapter):
             
             return job
             
-        except Exception as e:
-            logger.warning(f"Error fetching job detail from Greenhouse: {e}")
+        except Exception as error:
+            logger.warning(f"Error fetching job detail from Greenhouse: {error}")
             return None
     
     def search_jobs(self, query: str, limit: int = 50, raise_errors: bool = False) -> List[Job]:

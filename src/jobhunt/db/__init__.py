@@ -1,30 +1,39 @@
 """
-Database layer for JobHunt
-Uses SQLite for storing jobs, applications, and embeddings
+Database layer for JobHunt.
+
+Uses SQLite for storing jobs, applications, profiles, resumes, and cached
+embeddings.
 """
+import json
 import logging
 import sqlite3
-import os
 from datetime import datetime
 from typing import List, Optional
+
 import numpy as np
-from ..models import Job, Application, Profile, Resume
+
+from ..models import Application, Job, Profile, Resume
 
 logger = logging.getLogger(__name__)
 
 
 class JobHuntDB:
-    """SQLite database handler for JobHunt"""
-    
-    def __init__(self, db_path: str = "jobhunt.db"):
-        self.db_path = db_path
+    """SQLite database handler for JobHunt.
+
+    Args:
+        database_path: Filesystem path to the SQLite database file
+            (default: ``jobhunt.db`` in the current directory).
+    """
+
+    def __init__(self, database_path: str = "jobhunt.db"):
+        self.database_path = database_path
         self.init_database()
-        
-    def init_database(self):
-        """Initialize the database with required tables"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
+
+    def init_database(self) -> None:
+        """Create the required tables if they do not exist yet."""
+        with sqlite3.connect(self.database_path) as connection:
+            cursor = connection.cursor()
+
             # Create jobs table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -44,7 +53,7 @@ class JobHuntDB:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
+
             # Create applications table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS applications (
@@ -58,7 +67,7 @@ class JobHuntDB:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
+
             # Create embeddings table for caching
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS embeddings (
@@ -70,7 +79,7 @@ class JobHuntDB:
                     UNIQUE(kind, entity_id)
                 )
             ''')
-            
+
             # Create profiles table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS profiles (
@@ -87,7 +96,7 @@ class JobHuntDB:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
+
             # Create resumes table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS resumes (
@@ -99,14 +108,21 @@ class JobHuntDB:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
-            conn.commit()
-    
+
+            connection.commit()
+
     def save_job(self, job: Job) -> bool:
-        """Save a job to the database"""
+        """Save (upsert) a job to the database.
+
+        Args:
+            job: The job to persist.
+
+        Returns:
+            True on success, False on failure.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('''
                     INSERT OR REPLACE INTO jobs 
                     (id, title, company, location, description, url, posted_date, salary, remote, tags, source, fit_score, fit_explanation)
@@ -126,78 +142,100 @@ class JobHuntDB:
                     job.fit_score,
                     job.fit_explanation
                 ))
-                conn.commit()
+                connection.commit()
             return True
-        except Exception as e:
-            logger.warning(f"Error saving job: {e}")
+        except Exception as error:
+            logger.warning("Error saving job: %s", error)
             return False
-    
+
     def get_job(self, job_id: str) -> Optional[Job]:
-        """Get a job by ID"""
+        """Get a job by ID.
+
+        Args:
+            job_id: The id of the job to look up.
+
+        Returns:
+            The job, or ``None`` when not found.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('SELECT * FROM jobs WHERE id = ?', (job_id,))
-                row = cursor.fetchone()
-                if row:
+                record = cursor.fetchone()
+                if record:
                     return Job(
-                        id=row[0],
-                        title=row[1],
-                        company=row[2],
-                        location=row[3],
-                        description=row[4],
-                        url=row[5],
-                        posted_date=datetime.fromisoformat(row[6]) if row[6] else None,
-                        salary=row[7],
-                        remote=bool(row[8]) if row[8] is not None else None,
-                        tags=row[9].split(',') if row[9] else [],
-                        source=row[10],
-                        fit_score=row[11],
-                        fit_explanation=row[12]
+                        id=record[0],
+                        title=record[1],
+                        company=record[2],
+                        location=record[3],
+                        description=record[4],
+                        url=record[5],
+                        posted_date=datetime.fromisoformat(record[6]) if record[6] else None,
+                        salary=record[7],
+                        remote=bool(record[8]) if record[8] is not None else None,
+                        tags=record[9].split(',') if record[9] else [],
+                        source=record[10],
+                        fit_score=record[11],
+                        fit_explanation=record[12]
                     )
             return None
-        except Exception as e:
-            logger.warning(f"Error getting job: {e}")
+        except Exception as error:
+            logger.warning("Error getting job: %s", error)
             return None
-    
+
     def get_jobs(self, limit: int = 50, offset: int = 0) -> List[Job]:
-        """Get a list of jobs"""
+        """Get a list of jobs, most recently posted first.
+
+        Args:
+            limit: Maximum number of jobs to return.
+            offset: Number of jobs to skip for pagination.
+
+        Returns:
+            A list of job objects.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('''
                     SELECT * FROM jobs 
                     ORDER BY posted_date DESC, created_at DESC 
                     LIMIT ? OFFSET ?
                 ''', (limit, offset))
-                rows = cursor.fetchall()
+                records = cursor.fetchall()
                 jobs = []
-                for row in rows:
+                for record in records:
                     jobs.append(Job(
-                        id=row[0],
-                        title=row[1],
-                        company=row[2],
-                        location=row[3],
-                        description=row[4],
-                        url=row[5],
-                        posted_date=datetime.fromisoformat(row[6]) if row[6] else None,
-                        salary=row[7],
-                        remote=bool(row[8]) if row[8] is not None else None,
-                        tags=row[9].split(',') if row[9] else [],
-                        source=row[10],
-                        fit_score=row[11],
-                        fit_explanation=row[12]
+                        id=record[0],
+                        title=record[1],
+                        company=record[2],
+                        location=record[3],
+                        description=record[4],
+                        url=record[5],
+                        posted_date=datetime.fromisoformat(record[6]) if record[6] else None,
+                        salary=record[7],
+                        remote=bool(record[8]) if record[8] is not None else None,
+                        tags=record[9].split(',') if record[9] else [],
+                        source=record[10],
+                        fit_score=record[11],
+                        fit_explanation=record[12]
                     ))
                 return jobs
-        except Exception as e:
-            logger.warning(f"Error getting jobs: {e}")
+        except Exception as error:
+            logger.warning("Error getting jobs: %s", error)
             return []
-    
+
     def save_application(self, application: Application) -> bool:
-        """Save an application to the database"""
+        """Save (upsert) an application to the database.
+
+        Args:
+            application: The application to persist.
+
+        Returns:
+            True on success, False on failure.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('''
                     INSERT OR REPLACE INTO applications 
                     (job_id, status, applied_date, notes, cover_letter, resume_version)
@@ -210,121 +248,172 @@ class JobHuntDB:
                     application.cover_letter,
                     application.resume_version
                 ))
-                conn.commit()
+                connection.commit()
             return True
-        except Exception as e:
-            logger.warning(f"Error saving application: {e}")
+        except Exception as error:
+            logger.warning("Error saving application: %s", error)
             return False
-    
+
     def get_application(self, job_id: str) -> Optional[Application]:
-        """Get an application by job ID"""
+        """Get an application by job ID.
+
+        Args:
+            job_id: The id of the job whose application to look up.
+
+        Returns:
+            The application, or ``None`` when not found.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('SELECT * FROM applications WHERE job_id = ?', (job_id,))
-                row = cursor.fetchone()
-                if row:
+                record = cursor.fetchone()
+                if record:
                     return Application(
-                        job_id=row[0],
-                        status=row[1],
-                        applied_date=datetime.fromisoformat(row[2]) if row[2] else None,
-                        notes=row[3],
-                        cover_letter=row[4],
-                        resume_version=row[5]
+                        job_id=record[0],
+                        status=record[1],
+                        applied_date=datetime.fromisoformat(record[2]) if record[2] else None,
+                        notes=record[3],
+                        cover_letter=record[4],
+                        resume_version=record[5]
                     )
             return None
-        except Exception as e:
-            logger.warning(f"Error getting application: {e}")
+        except Exception as error:
+            logger.warning("Error getting application: %s", error)
             return None
-    
+
     def save_embedding(self, kind: str, entity_id: str, embedding: List[float]) -> bool:
-        """Save an embedding to the cache"""
+        """Save an embedding to the cache.
+
+        Args:
+            kind: The embedding kind (``job``, ``resume``, or ``profile``).
+            entity_id: The id of the entity the embedding belongs to.
+            embedding: The float vector to persist as JSON.
+
+        Returns:
+            True on success, False on failure.
+        """
         try:
-            import json
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 # Convert embedding to JSON string for storage
                 embedding_json = json.dumps(embedding)
                 cursor.execute('''
                     INSERT OR REPLACE INTO embeddings (kind, entity_id, embedding)
                     VALUES (?, ?, ?)
                 ''', (kind, entity_id, embedding_json))
-                conn.commit()
+                connection.commit()
             return True
-        except Exception as e:
-            logger.warning(f"Error saving embedding: {e}")
+        except Exception as error:
+            logger.warning("Error saving embedding: %s", error)
             return False
-    
+
     def get_embedding(self, kind: str, entity_id: str) -> Optional[List[float]]:
-        """Get an embedding from the cache"""
+        """Get an embedding from the cache.
+
+        Args:
+            kind: The embedding kind (``job``, ``resume``, or ``profile``).
+            entity_id: The id of the entity whose embedding to fetch.
+
+        Returns:
+            The embedding vector, or ``None`` when not cached.
+        """
         try:
-            import json
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT embedding FROM embeddings WHERE kind = ? AND entity_id = ?', (kind, entity_id))
-                row = cursor.fetchone()
-                if row:
-                    return json.loads(row[0])
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
+                cursor.execute(
+                    'SELECT embedding FROM embeddings WHERE kind = ? AND entity_id = ?',
+                    (kind, entity_id),
+                )
+                record = cursor.fetchone()
+                if record:
+                    return json.loads(record[0])
             return None
-        except Exception as e:
-            logger.warning(f"Error getting embedding: {e}")
+        except Exception as error:
+            logger.warning("Error getting embedding: %s", error)
             return None
-    
+
     def cosine_similarity(self, vec_a: List[float], vec_b: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
+        """Calculate cosine similarity between two vectors.
+
+        Args:
+            vec_a: The first vector.
+            vec_b: The second vector.
+
+        Returns:
+            A similarity in ``[0, 1]`` (0.0 when either vector is zero).
+        """
         try:
             # Convert to numpy arrays
             a = np.array(vec_a)
             b = np.array(vec_b)
-            
+
             # Calculate cosine similarity
             dot_product = np.dot(a, b)
             norm_a = np.linalg.norm(a)
             norm_b = np.linalg.norm(b)
-            
+
             if norm_a == 0 or norm_b == 0:
                 return 0.0
-                
+
             return dot_product / (norm_a * norm_b)
-        except Exception as e:
-            logger.warning(f"Error calculating cosine similarity: {e}")
+        except Exception as error:
+            logger.warning("Error calculating cosine similarity: %s", error)
             return 0.0
-    
+
     def get_job_embeddings(self) -> List[tuple]:
-        """Get all job embeddings for batch processing"""
+        """Get all job embeddings for batch processing.
+
+        Returns:
+            A list of ``(entity_id, vector)`` tuples for cached job
+            embeddings.
+        """
         try:
-            import json
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT id, embedding FROM embeddings WHERE kind = "job" AND embedding IS NOT NULL')
-                rows = cursor.fetchall()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
+                cursor.execute(
+                    'SELECT id, embedding FROM embeddings WHERE kind = "job" AND embedding IS NOT NULL'
+                )
+                records = cursor.fetchall()
                 # Convert JSON strings back to lists
-                return [(row[0], json.loads(row[1])) for row in rows]
-        except Exception as e:
-            logger.warning(f"Error getting job embeddings: {e}")
+                return [(record[0], json.loads(record[1])) for record in records]
+        except Exception as error:
+            logger.warning("Error getting job embeddings: %s", error)
             return []
-    
+
     def get_profile_embedding(self) -> Optional[List[float]]:
-        """Get profile embedding if it exists"""
+        """Get the cached profile embedding if it exists.
+
+        Returns:
+            The profile embedding vector, or ``None`` when not cached.
+        """
         try:
-            import json
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT embedding FROM embeddings WHERE kind = "profile" AND embedding IS NOT NULL LIMIT 1')
-                row = cursor.fetchone()
-                if row:
-                    return json.loads(row[0])
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
+                cursor.execute(
+                    'SELECT embedding FROM embeddings WHERE kind = "profile" '
+                    'AND embedding IS NOT NULL LIMIT 1'
+                )
+                record = cursor.fetchone()
+                if record:
+                    return json.loads(record[0])
             return None
-        except Exception as e:
-            logger.warning(f"Error getting profile embedding: {e}")
+        except Exception as error:
+            logger.warning("Error getting profile embedding: %s", error)
             return None
-    
+
     def save_profile(self, profile: Profile) -> bool:
-        """Save a user profile to the database"""
+        """Save (upsert) a user profile to the database.
+
+        Args:
+            profile: The profile to persist.
+
+        Returns:
+            True on success, False on failure.
+        """
         try:
-            import json
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('''
                     INSERT OR REPLACE INTO profiles 
                     (id, name, email, phone, location, summary, experience, education, skills, linkedin_url)
@@ -341,45 +430,59 @@ class JobHuntDB:
                     json.dumps(profile.skills) if profile.skills else '',
                     profile.linkedin_url
                 ))
-                conn.commit()
+                connection.commit()
             return True
-        except Exception as e:
-            logger.warning(f"Error saving profile: {e}")
+        except Exception as error:
+            logger.warning("Error saving profile: %s", error)
             return False
-    
+
     def get_profile(self, profile_id: str = None) -> Optional[Profile]:
-        """Get profile from the database"""
+        """Get a profile from the database.
+
+        Args:
+            profile_id: The id of the profile to fetch, or ``None`` to fetch
+                the first stored profile.
+
+        Returns:
+            The profile, or ``None`` when not found.
+        """
         try:
-            import json
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 if profile_id:
                     cursor.execute('SELECT * FROM profiles WHERE id = ?', (profile_id,))
                 else:
                     cursor.execute('SELECT * FROM profiles LIMIT 1')
-                row = cursor.fetchone()
-                if row:
+                record = cursor.fetchone()
+                if record:
                     return Profile(
-                        name=row[1],
-                        email=row[2],
-                        phone=row[3],
-                        location=row[4],
-                        summary=row[5],
-                        experience=json.loads(row[6]) if row[6] else [],
-                        education=json.loads(row[7]) if row[7] else [],
-                        skills=json.loads(row[8]) if row[8] else [],
-                        linkedin_url=row[9]
+                        name=record[1],
+                        email=record[2],
+                        phone=record[3],
+                        location=record[4],
+                        summary=record[5],
+                        experience=json.loads(record[6]) if record[6] else [],
+                        education=json.loads(record[7]) if record[7] else [],
+                        skills=json.loads(record[8]) if record[8] else [],
+                        linkedin_url=record[9]
                     )
             return None
-        except Exception as e:
-            logger.warning(f"Error getting profile: {e}")
+        except Exception as error:
+            logger.warning("Error getting profile: %s", error)
             return None
-    
+
     def save_resume(self, resume: Resume) -> bool:
-        """Save a resume to the database"""
+        """Save (upsert) a resume to the database.
+
+        Args:
+            resume: The resume to persist.
+
+        Returns:
+            True on success, False on failure.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('''
                     INSERT OR REPLACE INTO resumes 
                     (id, job_id, content, path, generated_at)
@@ -391,52 +494,67 @@ class JobHuntDB:
                     resume.path,
                     resume.generated_at.isoformat()
                 ))
-                conn.commit()
+                connection.commit()
             return True
-        except Exception as e:
-            logger.warning(f"Error saving resume: {e}")
+        except Exception as error:
+            logger.warning("Error saving resume: %s", error)
             return False
-    
+
     def get_resume(self, resume_id: str) -> Optional[Resume]:
-        """Get a resume by ID"""
+        """Get a resume by ID.
+
+        Args:
+            resume_id: The id of the resume to look up.
+
+        Returns:
+            The resume, or ``None`` when not found.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('SELECT * FROM resumes WHERE id = ?', (resume_id,))
-                row = cursor.fetchone()
-                if row:
+                record = cursor.fetchone()
+                if record:
                     return Resume(
-                        id=row[0],
-                        job_id=row[1],
-                        content=row[2],
-                        path=row[3],
-                        generated_at=datetime.fromisoformat(row[4])
+                        id=record[0],
+                        job_id=record[1],
+                        content=record[2],
+                        path=record[3],
+                        generated_at=datetime.fromisoformat(record[4])
                     )
             return None
-        except Exception as e:
-            logger.warning(f"Error getting resume: {e}")
+        except Exception as error:
+            logger.warning("Error getting resume: %s", error)
             return None
-    
+
     def count_jobs(self) -> int:
-        """Count total jobs in the database"""
+        """Count total jobs in the database.
+
+        Returns:
+            The number of stored jobs (0 on failure).
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('SELECT COUNT(*) FROM jobs')
                 result = cursor.fetchone()
                 return result[0] if result else 0
-        except Exception as e:
-            logger.warning(f"Error counting jobs: {e}")
+        except Exception as error:
+            logger.warning("Error counting jobs: %s", error)
             return 0
-    
+
     def count_applications(self) -> int:
-        """Count total applications in the database"""
+        """Count total applications in the database.
+
+        Returns:
+            The number of stored applications (0 on failure).
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.cursor()
                 cursor.execute('SELECT COUNT(*) FROM applications')
                 result = cursor.fetchone()
                 return result[0] if result else 0
-        except Exception as e:
-            logger.warning(f"Error counting applications: {e}")
+        except Exception as error:
+            logger.warning("Error counting applications: %s", error)
             return 0

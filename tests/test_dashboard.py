@@ -16,11 +16,11 @@ def test_count_jobs_method():
         db_path = tmp.name
     
     try:
-        db = JobHuntDB(db_path=db_path)
+        database = JobHuntDB(database_path=db_path)
         
         # Initially should have 0 jobs
-        assert db.count_jobs() == 0
-        assert db.count_applications() == 0
+        assert database.count_jobs() == 0
+        assert database.count_applications() == 0
         
         # Add a test job
         test_job = Job(
@@ -33,11 +33,11 @@ def test_count_jobs_method():
             source="test",
             posted_date="2023-01-01"
         )
-        db.save_job(test_job)
+        database.save_job(test_job)
         
         # Should have 1 job now
-        assert db.count_jobs() == 1
-        assert db.count_applications() == 0
+        assert database.count_jobs() == 1
+        assert database.count_applications() == 0
         
         # Add a test application
         test_application = Application(
@@ -45,11 +45,11 @@ def test_count_jobs_method():
             status="applied",
             applied_date="2023-01-01"
         )
-        db.save_application(test_application)
+        database.save_application(test_application)
         
         # Should have 1 job and 1 application
-        assert db.count_jobs() == 1
-        assert db.count_applications() == 1
+        assert database.count_jobs() == 1
+        assert database.count_applications() == 1
         
     finally:
         # Clean up the temporary file

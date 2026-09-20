@@ -50,8 +50,8 @@ class LeverAdapter(SourceAdapter):
                 
             return jobs
             
-        except Exception as e:
-            logger.warning(f"Error fetching jobs from Lever: {e}")
+        except Exception as error:
+            logger.warning(f"Error fetching jobs from Lever: {error}")
             if raise_errors:
                 raise
             return []

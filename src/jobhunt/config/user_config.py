@@ -76,9 +76,25 @@ class UserConfig(BaseModel):
     # ------------------------------------------------------------------
 
     def source_enabled(self, source: str) -> bool:
+        """Check whether a source is enabled (case-insensitive).
+
+        Args:
+            source: The source name to check (e.g. ``greenhouse``).
+
+        Returns:
+            True when the source is in the enabled list.
+        """
         return source.lower() in [s.lower() for s in self.sources.enabled]
 
     def companies_for(self, source: str) -> List[str]:
+        """Return the tracked company slugs for a source.
+
+        Args:
+            source: The source whose company slugs to fetch.
+
+        Returns:
+            The list of company slugs (empty when none configured).
+        """
         return list(self.sources.companies.get(source.lower(), []))
 
 

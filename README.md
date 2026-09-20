@@ -125,6 +125,5 @@ JOBHUNT_INTEGRATION=1 uv run pytest -m integration
 
 ## Project Layout
 
-See `plan/PLAN.md` for the full architecture and milestones. Phase 6 polishes
-the harness with retry/timeout handling, structured logging, a config UI,
-a unit + integration test suite, uv scripts, and a streaming agent loop.
+See [`docs/FEATURES.md`](docs/FEATURES.md) for the full feature list, source
+layout, dev commands, and phase-by-phase history.

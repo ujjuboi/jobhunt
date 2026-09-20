@@ -18,7 +18,20 @@ MAX_EMBED_RETRIES = 3
 
 
 def _retry_post(client: httpx.Client, url: str, *, headers: dict, json: dict) -> httpx.Response:
-    """POST with a small retry loop for transient failures (timeout/5xx/429)."""
+    """POST with a small retry loop for transient failures (timeout/5xx/429).
+
+    Args:
+        client: The HTTP client to post with.
+        url: The endpoint URL.
+        headers: Request headers.
+        json: The JSON payload.
+
+    Returns:
+        The final :class:`httpx.Response`.
+
+    Raises:
+        httpx.HTTPError: When transport errors still occur after all retries.
+    """
     attempts = 0
     while True:
         try:
@@ -33,13 +46,13 @@ def _retry_post(client: httpx.Client, url: str, *, headers: dict, json: dict) ->
                 time.sleep(delay)
                 continue
             return response
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
+        except (httpx.TimeoutException, httpx.ConnectError) as error:
             if attempts >= MAX_EMBED_RETRIES:
                 raise
             attempts += 1
             delay = 0.5 * (2 ** (attempts - 1)) + random.uniform(0, 0.1)
             logger.warning("Embedding API transport error %s; retry %d/%d in %.2fs",
-                           e, attempts, MAX_EMBED_RETRIES, delay)
+                           error, attempts, MAX_EMBED_RETRIES, delay)
             time.sleep(delay)
 
 
@@ -91,8 +104,8 @@ class EmbeddingClient:
                 logger.error("Embedding API error: %s - %s", response.status_code, response.text)
                 return None
 
-        except Exception as e:
-            logger.warning("Error generating embedding: %s", e, exc_info=True)
+        except Exception as error:
+            logger.warning("Error generating embedding: %s", error, exc_info=True)
             return None
 
     def embed_batch(
@@ -130,8 +143,8 @@ class EmbeddingClient:
                 logger.error("Batch embedding API error: %s - %s", response.status_code, response.text)
                 return None
 
-        except Exception as e:
-            logger.warning("Error generating batch embeddings: %s", e, exc_info=True)
+        except Exception as error:
+            logger.warning("Error generating batch embeddings: %s", error, exc_info=True)
             return None
 
     def normalize_embedding(self, embedding: List[float]) -> List[float]:
