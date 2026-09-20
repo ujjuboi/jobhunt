@@ -16,11 +16,22 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from textual.containers import Horizontal
 from textual.widgets import Button, Static, TextArea
 
 from ..agent import JobHuntAgent
 
 logger = logging.getLogger(__name__)
+
+NAV_BUTTONS: list[tuple[str, str, str]] = [
+    ("dashboard_btn", "dashboard", "Dashboard"),
+    ("search_btn", "search", "Search"),
+    ("jobs_btn", "jobs", "Jobs"),
+    ("fit_btn", "fit", "Fit"),
+    ("resume_btn", "resume", "Resume"),
+    ("chat_btn", "chat", "Chat"),
+    ("settings_btn", "settings", "Settings"),
+]
 
 
 class ScreenTitle(Static):
@@ -217,6 +228,62 @@ class WorkerMixin:
         return self._require_agent().run_tool("list_jobs")
 
 
+class NavBar(Horizontal):
+    """Shared navigation bar rendered on every screen.
+
+    The active tab is applied at mount time (first paint) by reading
+    ``self.app.active_tab``, and re-applied on every screen resume via
+    :meth:`set_active` (called from ``BaseScreen.on_screen_resume``).
+
+    Args:
+        *args: Positional arguments forwarded to :class:`Horizontal`.
+        **kwargs: Keyword arguments forwarded to :class:`Horizontal`.
+    """
+
+    NAV_BUTTONS = NAV_BUTTONS
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, id="nav_bar", **kwargs)
+
+    def compose(self):
+        """Yield plain Buttons for every nav button, gating Search."""
+        from jobhunt.config.user_config import keyword_search_available
+
+        for button_id, screen, label in NAV_BUTTONS:
+            if screen != "search" or keyword_search_available():
+                yield Button(label, id=button_id)
+
+    def on_mount(self) -> None:
+        """Apply the active class to the current tab button."""
+        self._apply_active()
+
+    def _apply_active(self) -> None:
+        """Add the ``active`` class to the matching button, remove from others.
+
+        Reads ``self.app.active_tab`` to determine which button to highlight.
+        """
+        active = self.app.active_tab
+        for button in self.query(Button):
+            button.remove_class("active")
+            button_id = button.id
+            for btn_id, screen, _ in NAV_BUTTONS:
+                if button_id == btn_id and screen == active:
+                    button.add_class("active")
+                    break
+
+    def set_active(self, screen_name: str) -> None:
+        """Update the active class to highlight ``screen_name`` in place.
+
+        Called by ``BaseScreen.on_screen_resume`` so the highlight stays
+        correct across screen switches even for already-mounted nav bars.
+
+        Args:
+            screen_name: The screen name to mark as active.
+        """
+        self.app.active_tab = screen_name
+        self._apply_active()
+
+
 __all__ = [
     "ScreenTitle",
     "StatusText",
@@ -224,4 +291,6 @@ __all__ = [
     "ActionButton",
     "AgentUnavailableError",
     "WorkerMixin",
+    "NavBar",
+    "NAV_BUTTONS",
 ]

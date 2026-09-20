@@ -1,7 +1,7 @@
 """
 Textual TUI Application for JobHunt.
 """
-from textual.app import App, SystemCommand
+from textual.app import App, AwaitComplete, SystemCommand
 from textual.screen import Screen
 from .screens.dashboard import DashboardScreen
 from .screens.search import SearchScreen
@@ -82,9 +82,22 @@ class JobHuntApp(App):
         super().__init__(*args, **kwargs)
         setup_logging()
         self.selected_job_id = None
+        self.active_tab: str = "dashboard"
         # Initialize database
         from ..db import JobHuntDB
         self.database = JobHuntDB()
+
+    def switch_screen(self, screen: "Screen | str") -> AwaitComplete:
+        """Switch to a different screen and track the active tab.
+
+        Args:
+            screen: The target screen name (str) or :class:`Screen` instance.
+
+        Returns:
+            An :class:`~textual.app.AwaitComplete` for the screen switch.
+        """
+        self.active_tab = screen if isinstance(screen, str) else screen.name
+        return super().switch_screen(screen)
 
     def on_mount(self):
         """Install and show the initial screen when the app is mounted."""
@@ -97,6 +110,7 @@ class JobHuntApp(App):
         self.install_screen(SettingsScreen(database=self.database), name="settings")
 
         # Show the initial screen
+        self.active_tab = "dashboard"
         self.push_screen("dashboard")
 
 
