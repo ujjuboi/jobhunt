@@ -2,6 +2,8 @@
 
 A focused TUI app tuned for job hunting, running entirely against your local oMLX server.
 
+<img width="720" height="397" alt="jobHuntDemo" src="https://github.com/user-attachments/assets/b5ff9982-8661-40e8-ab28-6371d32fc945" />
+
 ## Features
 
 - Scrapes job boards and scores job fit against your resume using local embeddings
