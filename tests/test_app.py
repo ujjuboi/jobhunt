@@ -253,3 +253,40 @@ def test_dashboard_quick_actions_switch_screens(monkeypatch):
             assert isinstance(app.screen, ResumeScreen)
 
     asyncio.run(run())
+
+
+def test_get_system_commands_order():
+    """get_system_commands must return [Keys, Theme, Screenshot, Quit]."""
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test() as pilot:
+            await asyncio.sleep(0.1)
+            commands = list(app.get_system_commands(app.screen))
+            names = [cmd.title for cmd in commands]
+            assert names == ["Keys", "Theme", "Screenshot", "Quit"]
+            # No Maximize or Minimize in the list
+            assert "Maximize" not in names
+            assert "Minimize" not in names
+
+    asyncio.run(run())
+
+
+def test_commands_provider_preserves_order():
+    """JobHuntCommandsProvider.discover must yield commands in the app order."""
+
+    async def run():
+        from jobhunt.app.palette import JobHuntCommandsProvider
+
+        app = JobHuntApp()
+        async with app.run_test() as pilot:
+            await asyncio.sleep(0.1)
+            provider = JobHuntCommandsProvider(app.screen)
+            hits = [hit async for hit in provider.discover()]
+            assert len(hits) == 4
+            assert hits[0].text == "Keys"
+            assert hits[1].text == "Theme"
+            assert hits[2].text == "Screenshot"
+            assert hits[3].text == "Quit"
+
+    asyncio.run(run())

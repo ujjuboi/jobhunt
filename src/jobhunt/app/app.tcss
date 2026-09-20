@@ -38,3 +38,11 @@
 #linkedin_block {
     height: auto;
 }
+
+HeaderIcon {
+    width: 9;
+    padding: 0 2;
+    text-style: bold;
+    background: $primary;
+    color: $background;
+}

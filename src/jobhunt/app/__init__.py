@@ -1,7 +1,8 @@
 """
 Textual TUI Application for JobHunt.
 """
-from textual.app import App
+from textual.app import App, SystemCommand
+from textual.screen import Screen
 from .screens.dashboard import DashboardScreen
 from .screens.search import SearchScreen
 from .screens.jobs import JobsScreen
@@ -9,6 +10,7 @@ from .screens.fit import FitScreen
 from .screens.resume import ResumeScreen
 from .screens.chat import ChatScreen
 from .screens.settings import SettingsScreen
+from .palette import JobHuntCommandsProvider
 from ..logging import setup_logging
 
 
@@ -16,6 +18,65 @@ class JobHuntApp(App):
     """Main JobHunt application."""
 
     CSS_PATH = "app.tcss"
+
+    COMMANDS = {JobHuntCommandsProvider}
+
+    def get_system_commands(self, screen: Screen) -> list[SystemCommand]:
+        """Return the system commands in a custom order.
+
+        The palette displays commands in this order: Keys, Theme,
+        Screenshot, Quit (Quit is always last).  The Maximize/Minimize
+        command is omitted.
+
+        Args:
+            screen: The screen where the command palette was invoked from.
+
+        Returns:
+            A list of :class:`~textual.app.SystemCommand` instances in the
+            desired display order.
+        """
+        commands: list[SystemCommand] = []
+
+        if screen.query("HelpPanel"):
+            commands.append(
+                SystemCommand(
+                    "Keys",
+                    "Hide the keys and widget help panel",
+                    self.action_hide_help_panel,
+                )
+            )
+        else:
+            commands.append(
+                SystemCommand(
+                    "Keys",
+                    "Show help for the focused widget and a summary of available keys",
+                    self.action_show_help_panel,
+                )
+            )
+
+        commands.append(
+            SystemCommand(
+                "Theme", "Change the current theme", self.action_change_theme
+            )
+        )
+
+        commands.append(
+            SystemCommand(
+                "Screenshot",
+                "Save an SVG 'screenshot' of the current screen",
+                lambda: self.set_timer(0.1, self.deliver_screenshot),
+            )
+        )
+
+        commands.append(
+            SystemCommand(
+                "Quit",
+                "Quit the application as soon as possible",
+                self.action_quit,
+            )
+        )
+
+        return commands
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
