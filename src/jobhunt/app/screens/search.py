@@ -12,7 +12,6 @@ from typing import List, Optional
 from textual.containers import Container
 from textual.widgets import Button, Input, Static
 
-from ...agent import JobHuntAgent
 from ...config.user_config import (
     KEYWORD_SOURCES,
     get_user_config,
@@ -116,13 +115,15 @@ class SearchScreen(BaseScreen):
         if not config.sources.enabled:
             return []
 
+        agent = self._require_agent()
+
         self.search_notes = []
         all_jobs: List[Job] = []
 
         for source in config.sources.enabled:
             try:
                 if source.lower() in KEYWORD_SOURCES:
-                    source_jobs = self.agent.run_tool(
+                    source_jobs = agent.run_tool(
                         "search_jobs",
                         query="",
                         source=source,
@@ -141,7 +142,7 @@ class SearchScreen(BaseScreen):
                         continue
                     for slug in companies:
                         try:
-                            slug_jobs = self.agent.run_tool(
+                            slug_jobs = agent.run_tool(
                                 "search_jobs",
                                 query="",
                                 source=source,

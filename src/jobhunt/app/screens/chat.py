@@ -165,7 +165,7 @@ class ChatScreen(BaseScreen):
             finally:
                 queue.put_nowait(None)
 
-        self.run_worker(asyncio.to_thread(_produce), group="chat_stream", exclusive=True)
+        self._run_worker(asyncio.to_thread(_produce), "chat_stream")
 
         while True:
             piece = await queue.get()

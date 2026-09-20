@@ -16,7 +16,7 @@ from ...db import JobHuntDB
 from ...embeddings import EmbeddingClient
 from ...models import FitScore
 from ...scoring import ScorePipeline
-from ..components import ActionButton, StatusText
+from ..components import ActionButton, AgentUnavailableError, StatusText
 from .base import BaseScreen
 
 
@@ -209,7 +209,11 @@ class FitScreen(BaseScreen):
         self._fit_scores = {}
 
         if not fit_scores:
-            self._render_jobs(self._list_jobs())
+            try:
+                self._render_jobs(self._list_jobs())
+            except AgentUnavailableError as error:
+                data_table.add_column("Error", key="error", width=40)
+                data_table.add_row(str(error))
             self._update_status("Scoring produced no results — check profile and oMLX, then try again.")
             return
 

@@ -79,6 +79,15 @@ class ScrollableTextWindow(TextArea):
         )
 
 
+class AgentUnavailableError(RuntimeError):
+    """Raised when an agent is required but could not be created.
+
+    Surfaces oMLX configuration/availability failures as a descriptive
+    error (instead of a bare ``AttributeError`` or a silent empty list) so
+    callers can tell an empty database apart from unavailable processing.
+    """
+
+
 class ActionButton(Button):
     """A Button for actionable controls (not navigation).
 
@@ -153,6 +162,21 @@ class WorkerMixin:
             logger.warning("Could not create agent (oMLX may be unavailable)")
             return None
 
+    def _require_agent(self) -> JobHuntAgent:
+        """Return the memoized agent, raising when it could not be created.
+
+        Returns:
+            The memoized :class:`JobHuntAgent` instance.
+
+        Raises:
+            AgentUnavailableError: When no agent could be created (typically
+                oMLX being unavailable/offline).
+        """
+        agent = self.agent
+        if agent is None:
+            raise AgentUnavailableError("oMLX unavailable — could not create agent")
+        return agent
+
     # ------------------------------------------------------------------
     # Worker helpers
     # ------------------------------------------------------------------
@@ -184,11 +208,13 @@ class WorkerMixin:
         """Blocking job listing helper, run off the event loop.
 
         Returns:
-            The list of jobs from the database, or ``[]`` when no agent
-            could be created (``JobHuntAgent.run_tool`` returns ``[]`` for
-            a missing database).
+            The list of jobs from the database.
+
+        Raises:
+            AgentUnavailableError: When no agent could be created, so callers
+                can distinguish an empty database from unavailable processing.
         """
-        return self.agent.run_tool("list_jobs") if self.agent else []
+        return self._require_agent().run_tool("list_jobs")
 
 
 __all__ = [
@@ -196,5 +222,6 @@ __all__ = [
     "StatusText",
     "ScrollableTextWindow",
     "ActionButton",
+    "AgentUnavailableError",
     "WorkerMixin",
 ]

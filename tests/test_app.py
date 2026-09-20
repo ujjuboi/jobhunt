@@ -53,8 +53,18 @@ def test_fit_screen_analyze_without_profile_guides_user(tmp_path):
             await asyncio.sleep(0.1)
             from jobhunt.app.screens.fit import FitScreen
             assert isinstance(app.screen, FitScreen)
+            # Let the mount-time job-load settle so its deferred status write
+            # cannot race the Analyze click below.
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                status = str(app.screen.query_one("#fit_status").content).lower()
+                if "no jobs" in status or status.startswith("error loading jobs"):
+                    break
             await pilot.click("#analyze_button")
-            await asyncio.sleep(0.1)
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "no profile" in str(app.screen.query_one("#fit_status").content):
+                    break
             status = app.screen.query_one("#fit_status").content
             assert "profile" in str(status).lower()
 
