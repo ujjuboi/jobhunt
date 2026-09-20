@@ -31,8 +31,8 @@ def check() -> None:
     """Run the smoke test then the test suite."""
     try:
         smoke()
-    except SystemExit as e:
-        if e.code:
+    except SystemExit as error:
+        if error.code:
             print("\nSmoke test failed; skipping test suite", file=sys.stderr)
             raise
     test()

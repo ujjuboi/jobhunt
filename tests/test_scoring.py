@@ -46,7 +46,7 @@ class FakeAgent:
     def __init__(self, score=0.9):
         self.score = score
 
-    def chat_with_agent(self, messages):
+    def chat_with_agent(self, messages, model=None):
         return {
             "score": self.score,
             "explanation": "great fit",

@@ -1,30 +1,40 @@
 """
-Agent module for JobHunt
-Handles tool calling and agent loop
+Agent module for JobHunt.
+
+Handles tool calling and the agent loop. :class:`ToolRegistry` exposes the
+tools the UI and agents can invoke; :class:`JobHuntAgent` wires those tools
+to the oMLX-backed chat client.
 """
-import os
-from typing import List, Dict, Any, Optional, Iterator
-from openai import OpenAI
-from ..config import get_omlx_settings, get_user_config
-from ..models import Job, FitScore, Profile, Application
-from ..sources import get_source_adapter
-from ..db import JobHuntDB
-from ..embeddings import EmbeddingClient
-from ..scoring import ScorePipeline
-from .. import llm
-from ..llm import get_default_model
 import json
 import logging
+import os
+from typing import Any, Dict, Iterator, List, Optional
+
+from openai import OpenAI
+
+from .. import llm
+from ..config import get_omlx_settings, get_user_config
+from ..db import JobHuntDB
+from ..embeddings import EmbeddingClient
+from ..llm import get_default_model
+from ..models import Application, FitScore, Job, Profile
+from ..sources import get_source_adapter
+from ..scoring import ScorePipeline
 
 logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
-    """Registry for all available agent tools"""
-    
-    def __init__(self, db: JobHuntDB = None, agent=None):
-        self.tools = {}
-        self.db = db
+    """Registry for all available agent tools.
+
+    Args:
+        database: The database the tools read/write through.
+        agent: The agent these tools serve (used for LLM-backed scoring).
+    """
+
+    def __init__(self, database: JobHuntDB = None, agent=None) -> None:
+        self.tools: Dict[str, Any] = {}
+        self.database = database
         self.agent = agent
         self.register_tool("search_jobs", self.search_jobs)
         self.register_tool("get_job_detail", self.get_job_detail)
@@ -33,52 +43,96 @@ class ToolRegistry:
         self.register_tool("generate_cover_letter", self.generate_cover_letter)
         self.register_tool("update_status", self.update_status)
         self.register_tool("list_jobs", self.list_jobs)
-        
-    def register_tool(self, name: str, func):
-        """Register a tool function"""
+
+    def register_tool(self, name: str, func) -> None:
+        """Register a tool function.
+
+        Args:
+            name: The tool name used to invoke it.
+            func: The callable implementing the tool.
+        """
         self.tools[name] = func
-        
+
     def get_tool(self, name: str):
-        """Get a tool function by name"""
+        """Get a tool function by name.
+
+        Args:
+            name: The tool name to look up.
+
+        Returns:
+            The registered callable, or ``None`` when unknown.
+        """
         return self.tools.get(name)
-        
+
     def list_tools(self) -> List[str]:
-        """Get list of all available tools"""
+        """Return the names of all registered tools.
+
+        Returns:
+            Sorted-in-insertion-order list of tool names.
+        """
         return list(self.tools.keys())
-    
+
     def _dedupe_jobs(self, jobs: List[Job]) -> List[Job]:
         """Remove in-batch duplicates by job id and (title, company).
 
         Re-fetched jobs that are already stored in the database are kept so
-        repeated browses still list them; save_job upserts by id.
-        """
-        deduped_jobs = []
-        seen_ids = set()
-        seen_keys = set()
+        repeated browses still list them; ``save_job`` upserts by id.
 
-        for job in jobs:
-            job_id = getattr(job, "id", None) or ""
+        Args:
+            jobs: The raw list of fresh jobs from a source adapter.
+
+        Returns:
+            A deduplicated list preserving first-seen order.
+        """
+        deduplicated = []
+        seen_ids: set = set()
+        seen_keys: set = set()
+
+        for job_entry in jobs:
+            job_id = getattr(job_entry, "id", None) or ""
             if job_id and job_id in seen_ids:
                 continue
             if job_id:
                 seen_ids.add(job_id)
 
-            title = (job.title or "").lower()
-            company = (job.company or "").lower()
-            key = (title, company) if (title or company) else job_id
-            if key and key in seen_keys:
+            title = (job_entry.title or "").lower()
+            company = (job_entry.company or "").lower()
+            dedupe_key = (title, company) if (title or company) else job_id
+            if dedupe_key and dedupe_key in seen_keys:
                 continue
-            if key:
-                seen_keys.add(key)
-            deduped_jobs.append(job)
+            if dedupe_key:
+                seen_keys.add(dedupe_key)
+            deduplicated.append(job_entry)
 
-        return deduped_jobs
-    
+        return deduplicated
+
+    # ------------------------------------------------------------------
     # Tool implementations
-    
-    def search_jobs(self, query: str, source: str = "", company: str = "", limit: int = 50, raise_errors: bool = False) -> List[Job]:
-        """Search for jobs using a query on specified source."""
-        if not self.db:
+    # ------------------------------------------------------------------
+
+    def search_jobs(
+        self,
+        query: str,
+        source: str = "",
+        company: str = "",
+        limit: int = 50,
+        raise_errors: bool = False,
+    ) -> List[Job]:
+        """Search for jobs using a query on the specified source.
+
+        Args:
+            query: The keyword query (empty for company-board browsing).
+            source: The source to search; defaults to the first enabled
+                source in the user config.
+            company: Optional company slug (required for board-only sources).
+            limit: Maximum number of jobs to fetch.
+            raise_errors: When True, re-raise adapter failures instead of
+                silently returning ``[]``.
+
+        Returns:
+            The fetched (and deduplicated) jobs, saved to the database.
+        """
+        if not self.database:
             return []
 
         # Resolve default source from user config when not specified explicitly.
@@ -98,33 +152,49 @@ class ToolRegistry:
             jobs = self._dedupe_jobs(jobs)
 
             # Save jobs to database (also set source on each job)
-            for job in jobs:
+            for job_entry in jobs:
                 # Set the source on each job (for the UI to display it)
-                job.source = source
-                self.db.save_job(job)
+                job_entry.source = source
+                self.database.save_job(job_entry)
 
             return jobs
 
-        except Exception as e:
-            logger.warning("Error searching jobs via %s: %s", source, e, exc_info=True)
+        except Exception as error:
+            logger.warning("Error searching jobs via %s: %s", source, error, exc_info=True)
             if raise_errors:
                 raise
             return []
 
     def get_job_detail(self, job_id: str) -> Optional[Job]:
-        """Get detailed information about a specific job"""
-        if not self.db:
+        """Get detailed information about a specific job.
+
+        Args:
+            job_id: The database id of the job to look up.
+
+        Returns:
+            The stored job, or ``None`` when not found.
+        """
+        if not self.database:
             return None
 
         try:
             # Try to get from local database first
-            return self.db.get_job(job_id)
-        except Exception as e:
-            logger.warning("Error getting job detail for %s: %s", job_id, e, exc_info=True)
+            return self.database.get_job(job_id)
+        except Exception as error:
+            logger.warning("Error getting job detail for %s: %s", job_id, error, exc_info=True)
             return None
-        
+
     def score_fit(self, job_id: str, profile: Profile) -> FitScore:
-        """Score job fit against profile using the hybrid embedding + LLM pipeline."""
+        """Score job fit against profile using the hybrid embedding + LLM pipeline.
+
+        Args:
+            job_id: The id of the job to score.
+            profile: The candidate profile to score against.
+
+        Returns:
+            A :class:`FitScore`, with a zero score and explanatory text when
+            scoring cannot be completed.
+        """
         def _failed(message: str) -> FitScore:
             return FitScore(
                 job_id=job_id,
@@ -135,23 +205,31 @@ class ToolRegistry:
                 suggested_bullets=[],
             )
 
-        if not self.db:
+        if not self.database:
             return _failed("No database available")
-        job = self.db.get_job(job_id)
-        if not job:
+        job_entry = self.database.get_job(job_id)
+        if not job_entry:
             return _failed(f"Job {job_id} not found")
         try:
-            pipeline = ScorePipeline(self.db, EmbeddingClient(), agent=self.agent)
-            results = pipeline.score([job], profile, mode="hybrid", top_n=1)
+            pipeline = ScorePipeline(self.database, EmbeddingClient(), agent=self.agent)
+            results = pipeline.score([job_entry], profile, mode="hybrid", top_n=1)
             return results[0] if results else _failed("No score could be computed")
-        except Exception as e:
-            logger.warning("Fit scoring failed for job %s: %s", job_id, e, exc_info=True)
-            return _failed(f"Fit scoring failed: {e}")
-        
+        except Exception as error:
+            logger.warning("Fit scoring failed for job %s: %s", job_id, error, exc_info=True)
+            return _failed(f"Fit scoring failed: {error}")
+
     def tailor_resume(self, job_id: str, profile: Profile) -> str:
-        """Tailor resume for a specific job"""
-        job = self.db.get_job(job_id) if self.db else None
-        if not job:
+        """Tailor a resume for a specific job.
+
+        Args:
+            job_id: The id of the job to tailor for.
+            profile: The candidate profile to tailor.
+
+        Returns:
+            A JSON string describing the result and artifact paths.
+        """
+        job_entry = self.database.get_job(job_id) if self.database else None
+        if not job_entry:
             return f"Job {job_id} not found"
 
         try:
@@ -159,15 +237,13 @@ class ToolRegistry:
             from ..resume.profile_parser import Profile as RProfile
 
             manager = ResumeManager()
-
-            # Convert models.Profile dict-style experience to resume.Profile ResumeSections
             resume_profile = self._convert_profile(profile)
 
             tailored = manager.generate_tailored_resume(
-                resume_profile, job.description, agent=self.agent,
+                resume_profile, job_entry.description, agent=self.agent,
             )
             artifacts = manager.save_tailored_resume(
-                tailored, job.company, job.id,
+                tailored, job_entry.company, job_entry.id,
             )
             return json.dumps({
                 "status": "ok",
@@ -175,16 +251,24 @@ class ToolRegistry:
                 "skills": tailored.updated_skills,
                 "artifacts": artifacts,
             }, indent=2)
-        except FileNotFoundError as e:
-            return f"Resume directory not found: {e}"
-        except Exception as e:
+        except FileNotFoundError as error:
+            return f"Resume directory not found: {error}"
+        except Exception as error:
             logger.exception("tailor_resume failed")
-            return f"Error tailoring resume: {e}"
+            return f"Error tailoring resume: {error}"
 
     def generate_cover_letter(self, job_id: str, profile: Profile) -> str:
-        """Generate cover letter for a specific job"""
-        job = self.db.get_job(job_id) if self.db else None
-        if not job:
+        """Generate a cover letter for a specific job.
+
+        Args:
+            job_id: The id of the job to write for.
+            profile: The candidate profile to write from.
+
+        Returns:
+            A JSON string describing the result and artifact path.
+        """
+        job_entry = self.database.get_job(job_id) if self.database else None
+        if not job_entry:
             return f"Job {job_id} not found"
 
         try:
@@ -194,39 +278,47 @@ class ToolRegistry:
             resume_profile = self._convert_profile(profile)
 
             cover_letter = manager.generate_cover_letter(
-                resume_profile, job.description,
-                company_name=job.company, agent=self.agent,
+                resume_profile, job_entry.description,
+                company_name=job_entry.company, agent=self.agent,
             )
             path = manager.save_cover_letter_to_output(
-                cover_letter, job.company, job.id,
+                cover_letter, job_entry.company, job_entry.id,
             )
             return json.dumps({
                 "status": "ok",
                 "path": path,
                 "preview": cover_letter.content[:500],
             }, indent=2)
-        except FileNotFoundError as e:
-            return f"Resume directory not found: {e}"
-        except Exception as e:
+        except FileNotFoundError as error:
+            return f"Resume directory not found: {error}"
+        except Exception as error:
             logger.exception("generate_cover_letter failed")
-            return f"Error generating cover letter: {e}"
+            return f"Error generating cover letter: {error}"
 
     @staticmethod
     def _convert_profile(profile: Profile):
-        """Convert models.Profile (dict-style) to resume.profile_parser.Profile (ResumeSection-style)."""
+        """Convert models.Profile (dict-style) to resume Profile sections.
+
+        Args:
+            profile: The database-style :class:`Profile` to convert.
+
+        Returns:
+            A :class:`jobhunt.resume.profile_parser.Profile` with
+            experience/education/projects mapped to ResumeSections.
+        """
         from ..resume.profile_parser import Profile as RProfile, ResumeSection
 
         def _dicts_to_sections(items):
             sections = []
-            for item in items:
-                if isinstance(item, dict):
+            for piece in items:
+                if isinstance(piece, dict):
                     sections.append(ResumeSection(
-                        title=item.get("title", ""),
-                        content=item.get("content", ""),
-                        bullets=item.get("bullets", []),
+                        title=piece.get("title", ""),
+                        content=piece.get("content", ""),
+                        bullets=piece.get("bullets", []),
                     ))
-                elif hasattr(item, "title"):
-                    sections.append(item)
+                elif hasattr(piece, "title"):
+                    sections.append(piece)
             return sections
 
         return RProfile(
@@ -240,18 +332,26 @@ class ToolRegistry:
             education=_dicts_to_sections(profile.education),
             projects=_dicts_to_sections(profile.projects),
         )
-        
+
     def update_status(self, job_id: str, status: str) -> bool:
-        """Update job application status"""
-        if not self.db:
+        """Update a job's application status.
+
+        Args:
+            job_id: The id of the job to update.
+            status: The new application status (e.g. ``saved``, ``applied``).
+
+        Returns:
+            True when the application entry was saved.
+        """
+        if not self.database:
             return False
-            
+
         try:
             # Get the job to make sure it exists
-            job = self.db.get_job(job_id)
-            if not job:
+            job_entry = self.database.get_job(job_id)
+            if not job_entry:
                 return False
-                
+
             # Create application entry
             application = Application(
                 job_id=job_id,
@@ -261,28 +361,36 @@ class ToolRegistry:
                 cover_letter=None,
                 resume_version=None
             )
-            
-            return self.db.save_application(application)
-        except Exception as e:
-            logger.warning("Error updating status for job %s: %s", job_id, e, exc_info=True)
+
+            return self.database.save_application(application)
+        except Exception as error:
+            logger.warning("Error updating status for job %s: %s", job_id, error, exc_info=True)
             return False
 
     def list_jobs(self) -> List[Job]:
-        """List all jobs"""
-        if not self.db:
+        """List all stored jobs.
+
+        Returns:
+            The jobs from the database, or ``[]`` on failure.
+        """
+        if not self.database:
             return []
 
         try:
-            return self.db.get_jobs()
-        except Exception as e:
-            logger.warning("Error listing jobs: %s", e, exc_info=True)
+            return self.database.get_jobs()
+        except Exception as error:
+            logger.warning("Error listing jobs: %s", error, exc_info=True)
             return []
 
 
 class JobHuntAgent:
-    """Main agent class for handling job hunting tasks"""
+    """Main agent class for handling job hunting tasks.
 
-    def __init__(self, db: JobHuntDB = None):
+    Args:
+        database: The database the agent's tools operate on.
+    """
+
+    def __init__(self, database: JobHuntDB = None) -> None:
         settings = get_omlx_settings()
         self.client = OpenAI(
             base_url=settings.base_url,
@@ -290,10 +398,21 @@ class JobHuntAgent:
             timeout=llm.DEFAULT_TIMEOUT_SECONDS,
             max_retries=2,
         )
-        self.tool_registry = ToolRegistry(db, agent=self)
+        self.tool_registry = ToolRegistry(database, agent=self)
 
     def run_tool(self, tool_name: str, **kwargs) -> Any:
-        """Execute a tool with given arguments"""
+        """Execute a tool with the given arguments.
+
+        Args:
+            tool_name: The name of the registered tool to invoke.
+            **kwargs: Keyword arguments forwarded to the tool.
+
+        Returns:
+            The tool's return value.
+
+        Raises:
+            ValueError: When ``tool_name`` is not a registered tool.
+        """
         tool = self.tool_registry.get_tool(tool_name)
         if tool:
             return tool(**kwargs)
@@ -301,6 +420,17 @@ class JobHuntAgent:
             raise ValueError(f"Unknown tool: {tool_name}")
 
     def _resolve_model(self, model: Optional[str]) -> str:
+        """Resolve the chat model name for a request.
+
+        Precedence: explicit ``model`` -> ``JOBHUNT_CHAT_MODEL`` env var ->
+        user config -> builtin default.
+
+        Args:
+            model: An explicit model override, or ``None``.
+
+        Returns:
+            The resolved model name.
+        """
         if model:
             return model
         # Check environment variable first
@@ -319,6 +449,13 @@ class JobHuntAgent:
         """Chat with the agent, returning the plain-text reply content.
 
         Uses the retrying LLM layer; transient oMLX failures are retried.
+
+        Args:
+            messages: The conversation history (role/content dicts).
+            model: Optional explicit model override.
+
+        Returns:
+            The agent's plain-text reply.
         """
         return llm.complete(
             messages,
@@ -326,16 +463,39 @@ class JobHuntAgent:
             temperature=0.1,
         )
 
-    def chat_stream(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> Iterator[str]:
-        """Chat with the agent, yielding reply text deltas as they stream in."""
+    def chat_stream(
+        self, messages: List[Dict[str, str]], model: Optional[str] = None
+    ) -> Iterator[str]:
+        """Chat with the agent, yielding reply text deltas as they stream in.
+
+        Args:
+            messages: The conversation history (role/content dicts).
+            model: Optional explicit model override.
+
+        Returns:
+            An iterator yielding reply text deltas.
+        """
         return llm.stream(
             messages,
             model=self._resolve_model(model),
             temperature=0.1,
         )
 
-    def chat_with_agent(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> Dict[str, Any]:
-        """Chat with the agent using structured responses (strict JSON object)."""
+    def chat_with_agent(
+        self, messages: List[Dict[str, str]], model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Chat with the agent using structured responses (strict JSON object).
+
+        Args:
+            messages: The conversation history (role/content dicts).
+            model: Optional explicit model override.
+
+        Returns:
+            The parsed JSON object reply.
+
+        Raises:
+            Exception: When the agent returns content that is not valid JSON.
+        """
         content = llm.complete(
             messages,
             model=self._resolve_model(model),
@@ -344,6 +504,6 @@ class JobHuntAgent:
         )
         try:
             return json.loads(content)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError as error:
             logger.warning("Agent returned non-JSON to chat_with_agent: %s", content[:200])
-            raise Exception(f"Agent returned invalid JSON: {e}") from e
+            raise Exception(f"Agent returned invalid JSON: {error}") from error

@@ -67,7 +67,7 @@ class DocxParser:
     def _parse_metadata(self):
         """Parse name, email, phone from document"""
         # Get document paragraphs
-        paragraphs = [p.text.strip() for p in self.doc.paragraphs if p.text.strip()]
+        paragraphs = [paragraph.text.strip() for paragraph in self.doc.paragraphs if paragraph.text.strip()]
         
         # Look for email pattern
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -86,7 +86,7 @@ class DocxParser:
     def _parse_sections(self):
         """Parse document sections"""
         # Get all paragraphs
-        paragraphs = [p for p in self.doc.paragraphs if p.text.strip()]
+        paragraphs = [paragraph for paragraph in self.doc.paragraphs if paragraph.text.strip()]
         
         # Look for section headers
         section_headers = ["experience", "work experience", "professional experience", 

@@ -40,15 +40,28 @@ class ResumeManager:
     # ------------------------------------------------------------------
 
     def list_available_resumes(self) -> List[str]:
+        """List available DOCX resumes.
+
+        Returns:
+            Filenames (``*.docx``) found in the base resume directory.
+        """
         if not self.base_resume_dir.exists():
             return []
         return [
-            f.name
-            for f in self.base_resume_dir.iterdir()
-            if f.is_file() and f.suffix.lower() == ".docx"
+            file.name
+            for file in self.base_resume_dir.iterdir()
+            if file.is_file() and file.suffix.lower() == ".docx"
         ]
 
     def load_profile_from_docx(self, docx_filename: str) -> Profile:
+        """Load a profile from a DOCX resume, using the cache when possible.
+
+        Args:
+            docx_filename: Name of the DOCX file within the resume directory.
+
+        Returns:
+            The parsed :class:`Profile`.
+        """
         docx_path = self.base_resume_dir / docx_filename
         cache_path = self.cache_dir / f"{docx_filename}.json"
         profile = load_profile_from_cache(str(cache_path))
@@ -58,7 +71,14 @@ class ResumeManager:
         return profile
 
     def to_db_profile(self, resume_profile: Profile) -> DBProfile:
-        """Convert resume.Profile to models.Profile for database storage"""
+        """Convert resume.Profile to models.Profile for database storage.
+
+        Args:
+            resume_profile: The parsed resume profile to convert.
+
+        Returns:
+            The database-style :class:`models.Profile`.
+        """
         # Convert experience sections to dictionaries
         experience_dicts = []
         for exp in resume_profile.experience:
@@ -110,6 +130,17 @@ class ResumeManager:
         job_description: str,
         agent=None,
     ) -> TailoredResume:
+        """Generate a tailored resume for a job description.
+
+        Args:
+            profile: The profile to tailor.
+            job_description: The job posting text to tailor against.
+            agent: Optional agent; when provided the LLM path is used with a
+                heuristic fallback for failures.
+
+        Returns:
+            The tailored :class:`TailoredResume`.
+        """
         tailor = ResumeTailor(agent=agent)
         return tailor.tailor_resume(profile, job_description)
 
@@ -119,12 +150,22 @@ class ResumeManager:
         tailored_resume: TailoredResume,
         output_path: str,
     ) -> bool:
+        """Rebuild a DOCX from a template using the tailored resume.
+
+        Args:
+            template_path: Path to the template DOCX.
+            tailored_resume: The tailored resume to embed.
+            output_path: Where to write the generated DOCX.
+
+        Returns:
+            True on success, False on failure.
+        """
         try:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             create_tailored_docx(template_path, tailored_resume, output_path)
             return True
-        except Exception as e:
-            logger.warning(f"Error creating tailored DOCX: {e}")
+        except Exception as error:
+            logger.warning("Error creating tailored DOCX: %s", error)
             return False
 
     # ------------------------------------------------------------------
@@ -132,6 +173,18 @@ class ResumeManager:
     # ------------------------------------------------------------------
 
     def generate_pdf(self, docx_path: str, pdf_path: str) -> bool:
+        """Generate a PDF from a DOCX using LibreOffice.
+
+        Args:
+            docx_path: The input DOCX file path.
+            pdf_path: The desired PDF output path.
+
+        Returns:
+            True when conversion succeeded.
+
+        Raises:
+            RuntimeError: When LibreOffice is unavailable or conversion fails.
+        """
         if not is_libreoffice_available():
             raise RuntimeError(
                 "LibreOffice is required for PDF generation. "
@@ -151,12 +204,32 @@ class ResumeManager:
         recipient_name: Optional[str] = None,
         agent=None,
     ) -> CoverLetter:
+        """Generate a cover letter for a job description.
+
+        Args:
+            profile: The profile to write from.
+            job_description: The job posting text.
+            company_name: Optional company to address; fallback is used when
+                that matches information absent from the config.
+            recipient_name: Optional recipient (hiring manager) name.
+            agent: Optional agent; when provided the LLM path is used with a
+                template fallback available.
+
+        Returns:
+            The generated :class:`CoverLetter`.
+        """
         generator = CoverLetterGenerator(agent=agent)
         return generator.generate_cover_letter(
             profile, job_description, company_name, recipient_name
         )
 
     def save_cover_letter(self, cover_letter: CoverLetter, output_path: str):
+        """Write a cover letter's text content to disk.
+
+        Args:
+            cover_letter: The cover letter to save.
+            output_path: Where to write the text file.
+        """
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             f.write(cover_letter.content)
@@ -166,7 +239,15 @@ class ResumeManager:
     # ------------------------------------------------------------------
 
     def get_output_dir(self, company: str, job_slug: str) -> Path:
-        """Return (and create) the output directory for a company/job pair."""
+        """Return (and create) the output directory for a company/job pair.
+
+        Args:
+            company: The company name (used for the directory name).
+            job_slug: The job id/slug (used for the directory name).
+
+        Returns:
+            The created output directory path.
+        """
         safe_company = company.replace("/", "-").replace(" ", "_").lower()
         safe_job = job_slug.replace("/", "-").replace(" ", "_").lower()
         out = self.outputs_dir / safe_company / safe_job
@@ -180,7 +261,18 @@ class ResumeManager:
         job_slug: str,
         template_path: Optional[str] = None,
     ) -> dict:
-        """Save tailored resume DOCX + optional PDF. Returns artifact paths."""
+        """Save tailored resume DOCX + optional PDF.
+
+        Args:
+            tailored: The tailored resume to save.
+            company: The company name (for the output directory).
+            job_slug: The job id/slug (for the output directory).
+            template_path: Optional DOCX template; defaults to the first
+                available resume.
+
+        Returns:
+            A dict of artifact paths (``docx`` always set; ``pdf`` may be None).
+        """
         out = self.get_output_dir(company, job_slug)
         docx_path = str(out / "resume.docx")
         pdf_path = str(out / "resume.pdf")
@@ -203,6 +295,16 @@ class ResumeManager:
         company: str,
         job_slug: str,
     ) -> str:
+        """Save a cover letter into the company/job output directory.
+
+        Args:
+            cover_letter: The cover letter to save.
+            company: The company name (for the output directory).
+            job_slug: The job id/slug (for the output directory).
+
+        Returns:
+            The path the cover letter was written to.
+        """
         out = self.get_output_dir(company, job_slug)
         path = str(out / "cover_letter.txt")
         self.save_cover_letter(cover_letter, path)

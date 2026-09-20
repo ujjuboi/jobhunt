@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class OEMLXSettings(BaseModel):
+    """oMLX connection settings (base URL and API key for the OpenAI-compatible endpoint)."""
+
     base_url: str
     api_key: str
 
@@ -27,7 +29,13 @@ class OEMLXSettings(BaseModel):
 def load_omlx_settings() -> OEMLXSettings:
     """
     Load oMLX settings from ~/.omlx/settings.json or environment variables
-    Environment variables take precedence over settings file
+    Environment variables take precedence over the settings file
+
+    Returns:
+        The resolved :class:`OEMLXSettings`.
+
+    Raises:
+        ValueError: When no API key can be found anywhere.
     """
     # Try to load from oMLX settings file
     omx_settings_path = os.path.expanduser("~/.omlx/settings.json")
@@ -62,8 +70,8 @@ def load_omlx_settings() -> OEMLXSettings:
                 raise ValueError("No API key found in settings.json or environment variables (OMLX_API_KEY)")
                 
             return OEMLXSettings(base_url=base_url, api_key=api_key)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Could not read oMLX settings from %s: %s", omx_settings_path, e)
+        except (json.JSONDecodeError, OSError) as error:
+            logger.warning("Could not read oMLX settings from %s: %s", omx_settings_path, error)
     
     # Fall back to environment variables
     base_url = os.environ.get('OMLX_BASE_URL', 'http://127.0.0.1:8000/v1')
@@ -88,6 +96,12 @@ def get_scoring_mode() -> str:
     """
     Return the fit-scoring mode: hybrid | embedding | llm.
     Precedence: JOBHUNT_SCORING_MODE env var -> user config -> hybrid.
+
+    Returns:
+        The validated scoring mode name.
+
+    Raises:
+        ValueError: When the resolved mode is not one of the valid modes.
     """
     mode = os.environ.get("JOBHUNT_SCORING_MODE")
     if mode is None:

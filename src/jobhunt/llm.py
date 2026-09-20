@@ -64,17 +64,25 @@ def get_default_model(kind: str = "chat") -> str:
     return DEFAULT_CHAT_MODEL
 
 
-def is_transient_error(status_code: Optional[int], exc: Optional[BaseException]) -> bool:
-    """Return True if the error looks transient (retryable)."""
+def is_transient_error(status_code: Optional[int], error: Optional[BaseException]) -> bool:
+    """Return True if the error looks transient (retryable).
+
+    Args:
+        status_code: The HTTP status code if one is available, else ``None``.
+        error: The raised exception if one is available, else ``None``.
+
+    Returns:
+        True for network/timeout/connect errors and 429/5xx statuses.
+    """
     if status_code in TRANSIENT_STATUS_CODES:
         return True
-    if exc is not None:
-        # Check if exc is a transient exception type
-        if isinstance(exc, TRANSIENT_EXCEPTION_TYPES):
+    if error is not None:
+        # Check if error is a transient exception type
+        if isinstance(error, TRANSIENT_EXCEPTION_TYPES):
             return True
         # Handle string representations of exception types for dynamic exception checking
-        exc_type_name = type(exc).__name__
-        exc_module = type(exc).__module__
+        exc_type_name = type(error).__name__
+        exc_module = type(error).__module__
         full_type_name = f"{exc_module}.{exc_type_name}" if exc_module != "__main__" else exc_type_name
         if full_type_name in ("openai.APIConnectionError", "openai.APITimeoutError", 
                               "httpx.ConnectError", "httpx.TimeoutException"):
@@ -95,17 +103,17 @@ def retry(max_retries: int = 3, base_delay: float = 0.5, jitter: float = 0.1):
             while True:
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
-                    status = getattr(e, "status_code", None)
+                except Exception as error:
+                    status = getattr(error, "status_code", None)
                     if status is None:
-                        status = getattr(e, "status", None)
-                    if attempts >= max_retries or not is_transient_error(status, e):
+                        status = getattr(error, "status", None)
+                    if attempts >= max_retries or not is_transient_error(status, error):
                         raise
                     attempts += 1
                     delay = base_delay * (2 ** (attempts - 1)) + random.uniform(0, jitter)
                     logger.warning(
                         "Retrying %s after transient error (%s), attempt %d/%d in %.2fs",
-                        func.__name__, e, attempts, max_retries, delay,
+                        func.__name__, error, attempts, max_retries, delay,
                     )
                     time.sleep(delay)
 
@@ -116,17 +124,17 @@ def retry(max_retries: int = 3, base_delay: float = 0.5, jitter: float = 0.1):
                 while True:
                     try:
                         return await coro(*args, **kwargs)
-                    except Exception as e:
-                        status = getattr(e, "status_code", None)
+                    except Exception as error:
+                        status = getattr(error, "status_code", None)
                         if status is None:
-                            status = getattr(e, "status", None)
-                        if attempts >= max_retries or not is_transient_error(status, e):
+                            status = getattr(error, "status", None)
+                        if attempts >= max_retries or not is_transient_error(status, error):
                             raise
                         attempts += 1
                         delay = base_delay * (2 ** (attempts - 1)) + random.uniform(0, jitter)
                         logger.warning(
                             "Retrying %s after transient error (%s), attempt %d/%d in %.2fs",
-                            coro.__name__, e, attempts, max_retries, delay,
+                            coro.__name__, error, attempts, max_retries, delay,
                         )
                         await asyncio.sleep(delay)
             return async_wrapper
@@ -197,14 +205,14 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
                             seen_content += content_to_yield
                             yield content_to_yield
             return
-        except Exception as e:
-            status = getattr(e, "status_code", None)
+        except Exception as error:
+            status = getattr(error, "status_code", None)
             if status is None:
-                status = getattr(e, "status", None)
-            if attempts >= 3 or not is_transient_error(status, e):
+                status = getattr(error, "status", None)
+            if attempts >= 3 or not is_transient_error(status, error):
                 raise
             attempts += 1
             delay = 0.5 * (2 ** (attempts - 1)) + random.uniform(0, 0.1)
             logger.warning("Restarting stream after transient error (%s), attempt %d/3 in %.2fs",
-                            e, attempts, delay)
+                            error, attempts, delay)
             time.sleep(delay)

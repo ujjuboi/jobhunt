@@ -70,8 +70,8 @@ class LinkedInAdapter(SourceAdapter):
             Path(self.session_file).parent.mkdir(parents=True, exist_ok=True)
             self.context.storage_state(path=self.session_file)
             return True
-        except Exception as e:
-            logger.warning(f"LinkedIn login failed: {e}")
+        except Exception as error:
+            logger.warning(f"LinkedIn login failed: {error}")
             raise
         finally:
             self._close_browser()
@@ -152,8 +152,8 @@ class LinkedInAdapter(SourceAdapter):
                     continue
 
             return jobs
-        except Exception as e:
-            logger.warning(f"Error fetching jobs from LinkedIn: {e}")
+        except Exception as error:
+            logger.warning(f"Error fetching jobs from LinkedIn: {error}")
             if raise_errors:
                 raise
             return []
@@ -188,8 +188,8 @@ class LinkedInAdapter(SourceAdapter):
                 "url": f"{self.base_url}/jobs/view/{job_id}",
                 "posted_date": None,
             })
-        except Exception as e:
-            logger.warning(f"Error fetching job detail from LinkedIn: {e}")
+        except Exception as error:
+            logger.warning(f"Error fetching job detail from LinkedIn: {error}")
             return None
         finally:
             self._close_browser()

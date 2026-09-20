@@ -10,6 +10,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 import json
 import logging
+from pathlib import Path
 
 from .profile_parser import Profile
 
@@ -55,6 +56,8 @@ Return the tailored resume as JSON only — no markdown fences, no commentary.
 
 
 class TailoredResume(BaseModel):
+    """A resume tailored to a specific job description."""
+
     original_profile: Profile
     job_description: str
     tailored_sections: Dict[str, List[str]]
@@ -63,29 +66,61 @@ class TailoredResume(BaseModel):
 
 
 def _format_experience(profile: Profile) -> str:
+    """Render the experience sections for an LLM prompt.
+
+    Args:
+        profile: The profile whose experience to format.
+
+    Returns:
+        A markdown-ish, newline-joined string of experience bullets.
+    """
     lines = []
     for section in profile.experience:
         lines.append(f"### {section.title}")
-        for b in section.bullets:
-            lines.append(f"- {b}")
+        for bullet in section.bullets:
+            lines.append(f"- {bullet}")
     return "\n".join(lines) if lines else "(none)"
 
 
 def _format_education(profile: Profile) -> str:
+    """Render the education sections for an LLM prompt.
+
+    Args:
+        profile: The profile whose education to format.
+
+    Returns:
+        A markdown-ish, newline-joined string of education bullets.
+    """
     lines = []
     for section in profile.education:
         lines.append(f"### {section.title}")
-        for b in section.bullets:
-            lines.append(f"- {b}")
+        for bullet in section.bullets:
+            lines.append(f"- {bullet}")
     return "\n".join(lines) if lines else "(none)"
 
 
 class ResumeTailor:
+    """Tailors a profile to a job description, LLM-first with heuristic fallback.
+
+    Args:
+        agent: Optional agent whose client is used for the LLM path.
+        model: The oMLX model name used for tailoring.
+    """
+
     def __init__(self, agent=None, model: str = "Qwen3-30B-A3B-6bit"):
         self.agent = agent
         self.model = model
 
     def tailor_resume(self, profile: Profile, job_description: str) -> TailoredResume:
+        """Tailor a profile against a job description.
+
+        Args:
+            profile: The profile to tailor.
+            job_description: The job posting text to tailor against.
+
+        Returns:
+            The tailored :class:`TailoredResume`.
+        """
         if self.agent is not None:
             try:
                 return self._llm_tailor(profile, job_description)
@@ -98,6 +133,18 @@ class ResumeTailor:
     # ------------------------------------------------------------------
 
     def _llm_tailor(self, profile: Profile, job_description: str) -> TailoredResume:
+        """Run the LLM tailoring path via the agent's OpenAI-compatible client.
+
+        Args:
+            profile: The profile to tailor.
+            job_description: The job posting text.
+
+        Returns:
+            The tailored :class:`TailoredResume`.
+
+        Raises:
+            json.JSONDecodeError: When the LLM output cannot be parsed.
+        """
         user_msg = TAILOR_USER_TEMPLATE.format(
             name=profile.name,
             summary=profile.summary or "(none)",
@@ -146,6 +193,16 @@ class ResumeTailor:
     # ------------------------------------------------------------------
 
     def _heuristic_tailor(self, profile: Profile, job_description: str) -> TailoredResume:
+        """Tailor using keyword matching without an LLM.
+
+        Args:
+            profile: The profile to tailor.
+            job_description: The job posting text.
+
+        Returns:
+            A :class:`TailoredResume` with JD-matched skills and unchanged
+            experience bullets.
+        """
         jd_lower = job_description.lower()
 
         # Skills: keep existing, add JD-matched keywords
@@ -201,6 +258,13 @@ def create_tailored_docx(
     tailored_resume: TailoredResume,
     output_path: str,
 ):
+    """Rebuild a DOCX from a template, embedding the tailored resume content.
+
+    Args:
+        template_path: Path to the template DOCX (used for section/page props).
+        tailored_resume: The tailored resume to embed.
+        output_path: Where to write the generated DOCX.
+    """
     doc = Document(template_path)
 
     # Clear existing body elements (preserve section properties)

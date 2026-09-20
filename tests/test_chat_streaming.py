@@ -6,7 +6,7 @@ does not.
 import asyncio
 
 from jobhunt.app import JobHuntApp
-from jobhunt.app.screens import chat as chat_module
+from jobhunt.app import components as components_module
 
 
 class FakeStreamAgent:
@@ -33,7 +33,7 @@ class FakeEagerAgent:
 def test_chat_streams_reply_incrementally(monkeypatch):
     async def run():
         fake = FakeStreamAgent()
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
@@ -61,7 +61,7 @@ def test_chat_falls_back_when_no_stream(monkeypatch):
 
     async def run():
         fake = FakeEagerAgent()
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)

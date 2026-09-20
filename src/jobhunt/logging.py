@@ -12,7 +12,12 @@ from pathlib import Path
 
 
 def setup_logging(level: int = logging.INFO, log_to_file: bool = True) -> None:
-    """Configure root logging for JobHunt. Safe to call multiple times."""
+    """Configure root logging for JobHunt. Safe to call multiple times.
+
+    Args:
+        level: The root logging level (default ``INFO``).
+        log_to_file: Whether to also write to ``~/.config/jobhunt/logs/``.
+    """
     root = logging.getLogger()
     if getattr(root, "_jobhunt_configured", False):
         return

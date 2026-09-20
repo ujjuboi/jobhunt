@@ -47,6 +47,8 @@ Return the cover letter as JSON only — no markdown fences, no commentary.
 
 
 class CoverLetter(BaseModel):
+    """A cover letter generated for a specific job."""
+
     profile: Profile
     job_description: str
     content: str
@@ -55,6 +57,13 @@ class CoverLetter(BaseModel):
 
 
 class CoverLetterGenerator:
+    """Generates cover letters, LLM-first with a template fallback.
+
+    Args:
+        agent: Optional agent whose client is used for the LLM path.
+        model: The oMLX model name used for generation.
+    """
+
     def __init__(self, agent=None, model: str = "Qwen3-30B-A3B-6bit"):
         self.agent = agent
         self.model = model
@@ -67,6 +76,18 @@ class CoverLetterGenerator:
         recipient_name: Optional[str] = None,
         custom_instructions: Optional[str] = None,
     ) -> CoverLetter:
+        """Generate a cover letter for a job description.
+
+        Args:
+            profile: The profile to write from.
+            job_description: The job posting text.
+            company_name: Optional company to address it to.
+            recipient_name: Optional recipient (hiring manager) name.
+            custom_instructions: Optional extra instructions for the LLM.
+
+        Returns:
+            The generated :class:`CoverLetter`.
+        """
         if self.agent is not None:
             try:
                 return self._llm_generate(
@@ -91,6 +112,21 @@ class CoverLetterGenerator:
         recipient_name: Optional[str],
         custom_instructions: Optional[str],
     ) -> CoverLetter:
+        """Generate the cover letter via the agent's OpenAI-compatible client.
+
+        Args:
+            profile: The profile to write from.
+            job_description: The job posting text.
+            company_name: Optional company to address it to.
+            recipient_name: Optional recipient name.
+            custom_instructions: Optional extra instructions.
+
+        Returns:
+            The generated :class:`CoverLetter`.
+
+        Raises:
+            json.JSONDecodeError: When the LLM output cannot be parsed.
+        """
         instructions_lines = []
         if company_name:
             instructions_lines.append(f"Company: {company_name}")
@@ -148,6 +184,17 @@ class CoverLetterGenerator:
         company_name: Optional[str],
         recipient_name: Optional[str],
     ) -> CoverLetter:
+        """Build a template-based cover letter when no LLM is available.
+
+        Args:
+            profile: The profile to write from.
+            job_description: The job posting text (for keyword extraction).
+            company_name: Optional company to address it to.
+            recipient_name: Optional recipient name.
+
+        Returns:
+            The generated :class:`CoverLetter` with templated text.
+        """
         company = company_name or "your company"
         recipient = recipient_name or "Hiring Manager"
 

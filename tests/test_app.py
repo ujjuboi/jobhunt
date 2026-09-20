@@ -6,7 +6,7 @@ import asyncio
 from textual.widgets import Static
 
 from jobhunt.app import JobHuntApp
-from jobhunt.app.screens import chat as chat_module
+from jobhunt.app import components as components_module
 from jobhunt.app.screens.chat import ChatScreen
 from jobhunt.app.screens.dashboard import DashboardScreen
 from jobhunt.agent import ToolRegistry
@@ -39,11 +39,14 @@ def test_nav_switches_screen():
     asyncio.run(run())
 
 
-def test_fit_screen_analyze_without_profile_guides_user():
+def test_fit_screen_analyze_without_profile_guides_user(tmp_path):
     """Fit screen with an empty DB must explain that a profile is needed."""
 
     async def run():
         app = JobHuntApp()
+        # Use an isolated empty DB so the score table stays small enough for
+        # the Analyze button to remain on-screen in the test terminal.
+        app.database = JobHuntDB(str(tmp_path / "empty.db"))
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
             await pilot.click("#fit_btn")
@@ -110,7 +113,7 @@ def test_chat_round_trip(monkeypatch):
 
     async def run():
         fake = FakeAgent()
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
@@ -137,7 +140,7 @@ def test_chat_surfaces_agent_error(monkeypatch):
 
     async def run():
         fake = FakeAgent(error=RuntimeError("oMLX down"))
-        monkeypatch.setattr(chat_module, "JobHuntAgent", lambda db=None: fake)
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
         app = JobHuntApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)

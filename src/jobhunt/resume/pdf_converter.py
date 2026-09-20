@@ -46,4 +46,9 @@ def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
 
 
 def is_libreoffice_available() -> bool:
+    """Check whether LibreOffice is available on PATH.
+
+    Returns:
+        True when the ``libreoffice`` binary can be found.
+    """
     return shutil.which('libreoffice') is not None

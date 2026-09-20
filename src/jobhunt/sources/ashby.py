@@ -48,8 +48,8 @@ class AshbyAdapter(SourceAdapter):
                 
             return jobs
             
-        except Exception as e:
-            logger.warning(f"Error fetching jobs from Ashby: {e}")
+        except Exception as error:
+            logger.warning(f"Error fetching jobs from Ashby: {error}")
             if raise_errors:
                 raise
             return []
