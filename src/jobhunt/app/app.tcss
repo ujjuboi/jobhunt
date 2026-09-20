@@ -52,3 +52,16 @@ HeaderIcon {
     background: $primary;
     color: $background;
 }
+
+/* Make the chat input area visually distinct from the transcript. */
+#chat_input {
+    margin-top: 1;
+    background: $panel;
+    border: tall $secondary;
+    padding: 0 2;
+}
+
+#chat_input > .input--placeholder {
+    color: $primary;
+    text-style: italic;
+}
