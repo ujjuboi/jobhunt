@@ -11,6 +11,12 @@
     min-width: 10;
 }
 
+#nav_bar Button.active {
+    background: $background;
+    color: $primary;
+    text-style: bold;
+}
+
 #main_content {
     padding: 1;
 }
