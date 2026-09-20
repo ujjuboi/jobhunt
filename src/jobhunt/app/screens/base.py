@@ -7,13 +7,12 @@ reference used by every screen, small widgets built from the shared
 """
 from typing import Optional
 
-from textual.containers import Container, Horizontal
+from textual.containers import Container
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
-from ...config.user_config import keyword_search_available
 from ...db import JobHuntDB
-from ..components import ActionButton, ScreenTitle, StatusText, WorkerMixin
+from ..components import ActionButton, NavBar, ScreenTitle, StatusText, WorkerMixin
 
 
 class BaseScreen(WorkerMixin, Screen):
@@ -25,16 +24,6 @@ class BaseScreen(WorkerMixin, Screen):
             tests that only exercise the widget tree).
     """
 
-    NAV_BUTTONS = [
-        ("dashboard_btn", "dashboard", "Dashboard"),
-        ("search_btn", "search", "Search"),
-        ("jobs_btn", "jobs", "Jobs"),
-        ("fit_btn", "fit", "Fit"),
-        ("resume_btn", "resume", "Resume"),
-        ("chat_btn", "chat", "Chat"),
-        ("settings_btn", "settings", "Settings"),
-    ]
-
     def __init__(self, name: str, database: Optional[JobHuntDB] = None) -> None:
         self.screen_name = name
         self.database = database
@@ -44,13 +33,7 @@ class BaseScreen(WorkerMixin, Screen):
         """Create the screen layout: header, nav bar, content, footer."""
         yield Header()
 
-        nav_buttons = [
-            ActionButton(label, id=button_id)
-            for button_id, screen, label in self.NAV_BUTTONS
-            if screen != "search" or keyword_search_available()
-        ]
-
-        yield Horizontal(*nav_buttons, id="nav_bar")
+        yield NavBar()
         yield Container(
             self._title(f"JobHunt - {self.screen_name.title()} Screen", id="screen_title"),
             self._get_content(),
@@ -66,11 +49,23 @@ class BaseScreen(WorkerMixin, Screen):
                 target screen.
         """
         button_id = event.button.id
-        for btn_id, screen, _ in self.NAV_BUTTONS:
+        for btn_id, screen, _ in NavBar.NAV_BUTTONS:
             if button_id == btn_id:
                 if self.screen_name != screen:
                     self.app.switch_screen(screen)
                 return
+
+    def on_screen_resume(self) -> None:
+        """Re-apply the active-tab highlight whenever the screen is shown.
+
+        The NavBar mounts once per screen, so re-applying on every resume keeps
+        the highlight correct even for screens that are already mounted. The
+        NavBar may not be mounted yet on the first visit; ``on_mount`` covers
+        that case.
+        """
+        nav_bar = self.query(NavBar).first()
+        if nav_bar is not None:
+            nav_bar.set_active(self.screen_name)
 
     def _get_content(self):
         """Override this in subclasses to provide specific content.

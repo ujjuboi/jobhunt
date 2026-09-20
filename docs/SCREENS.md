@@ -12,15 +12,14 @@ Every screen subclasses `BaseScreen` (`app/screens/base.py`), which provides:
 - **Command palette** — `JobHuntCommandsProvider` (`app/palette.py`) replaces Textual's
   default provider; `App.get_system_commands` yields Keys, Theme, Screenshot, then Quit
   last (Maximize/Minimize is omitted), and the provider preserves that order without sorting
-- **Navigation bar** — `#nav_bar` with 7 buttons (Dashboard, Search, Jobs, Fit, Resume, Chat, Settings)
+- **Navigation bar** — shared `NavBar` component (`app/components.py`) with 7 buttons (Dashboard, Search, Jobs, Fit, Resume, Chat, Settings); the active tab is highlighted via the `active` CSS class, driven by the global `app.active_tab` state
 - **Content area** — `#screen_content` container
 - **Footer**
 - **Status text** — one-line status message via `self._status(text, id=...)` and `set_message()`
 - **Background work** — never block the event loop; use `self._run_worker(coro, group)` from `WorkerMixin` and update the UI with `self.call_after_refresh(...)`
 - **Busy guard** — re-entry is prevented with `self._is_busy(group)`
 
-CRITICAL: the nav bar was moved from `App.compose` into `BaseScreen` because Textual screens
-fully replace the App body — a nav in `App.compose` would vanish after the first screen switch.
+Each screen yields a shared `NavBar` component (`app/components.py`) from its `compose()` method. The active tab is updated globally in `JobHuntApp.switch_screen()` before the new screen displays. The `NavBar` applies the `active` CSS class to the matching button at mount time (first visit, driven by `app.active_tab`) and re-applies it on every screen resume via `BaseScreen.on_screen_resume()` → `NavBar.set_active()`, so already-mounted screens keep the correct highlight across switches.
 
 ## Screen Details
 
