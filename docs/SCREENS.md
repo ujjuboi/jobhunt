@@ -7,7 +7,11 @@ JobHunt uses Textual for its terminal UI. There are **7 screens** installed on t
 
 Every screen subclasses `BaseScreen` (`app/screens/base.py`), which provides:
 
-- **Header** — bold page title via `self._title(text, id=...)`
+- **Header** — bold page title via `self._title(text, id=...)`; the `HeaderIcon` trigger
+  (`⭘`) is restyled in `app.tcss` with a `$primary` background for visibility
+- **Command palette** — `JobHuntCommandsProvider` (`app/palette.py`) replaces Textual's
+  default provider; `App.get_system_commands` yields Keys, Theme, Screenshot, then Quit
+  last (Maximize/Minimize is omitted), and the provider preserves that order without sorting
 - **Navigation bar** — `#nav_bar` with 7 buttons (Dashboard, Search, Jobs, Fit, Resume, Chat, Settings)
 - **Content area** — `#screen_content` container
 - **Footer**
