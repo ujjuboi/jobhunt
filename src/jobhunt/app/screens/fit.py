@@ -16,7 +16,7 @@ from ...db import JobHuntDB
 from ...embeddings import EmbeddingClient
 from ...models import FitScore
 from ...scoring import ScorePipeline
-from ..components import ActionButton, AgentUnavailableError, StatusText
+from ..components import ActionButton, AgentUnavailableError, ButtonRow, StatusText
 from .base import BaseScreen
 
 
@@ -39,7 +39,7 @@ class FitScreen(BaseScreen):
             self._status("", id="fit_status"),
             DataTable(id="fit_table"),
             Static("Select a job to see the fit breakdown.", id="fit_detail"),
-            ActionButton("Analyze", id="analyze_button"),
+            ButtonRow(ActionButton("Analyze", id="analyze_button")),
             id="fit_content"
         )
 

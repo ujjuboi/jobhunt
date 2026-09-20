@@ -87,6 +87,80 @@ class LinkedInAdapter(SourceAdapter):
         self.page = None
         self.playwright = None
 
+    def session_email(self) -> Optional[str]:
+        """Return the signed-in account email from the persisted session.
+
+        Resolves the address from the authenticated browser session — the
+        authenticated ``/voyager/api/me`` payload first, then the account
+        settings page as a fallback — so the TUI can report exactly who is
+        signed in. No browser is launched when no session is saved.
+
+        Returns:
+            The primary email of the logged-in account, or ``None`` when no
+            reusable session exists or the address could not be resolved.
+        """
+        if not os.path.exists(self.session_file):
+            return None
+        try:
+            self._setup_browser()
+            email = self._email_from_me_payload()
+            if email is None:
+                email = self._email_from_account_settings()
+            return email
+        except Exception as error:
+            logger.warning(f"Could not resolve LinkedIn account email: {error}")
+            return None
+        finally:
+            self._close_browser()
+
+    def _csrf_token(self) -> str:
+        """Return the anti-CSRF token (JSESSIONID cookie) for the session.
+
+        Returns:
+            The raw JSESSIONID cookie value, or ``""`` when absent.
+        """
+        for cookie in self.context.cookies():
+            if cookie.get("name") == "JSESSIONID":
+                return cookie["value"].strip('"')
+        return ""
+
+    def _email_from_me_payload(self) -> Optional[str]:
+        """Try resolving the email from the authenticated me payload.
+
+        Returns:
+            The email address embedded in the payload, or ``None`` on
+            failure or when the field is absent.
+        """
+        try:
+            response = self.context.request.get(
+                f"{self.base_url}/voyager/api/me",
+                headers={"csrf-token": self._csrf_token()},
+            )
+            if not response.ok:
+                return None
+            match = re.search(r'"emailAddress"\s*:\s*"([^"]+)"', response.text())
+            return match.group(1) if match else None
+        except Exception:
+            return None
+
+    def _email_from_account_settings(self) -> Optional[str]:
+        """Fall back to reading the email from the account settings page.
+
+        Returns:
+            The first email-looking string on the page, or ``None`` when the
+            page could not be loaded or parsed.
+        """
+        try:
+            self.page.goto(f"{self.base_url}/settings/account")
+            self.page.wait_for_load_state("domcontentloaded")
+            body = self.page.inner_text("body")
+            matches = re.findall(
+                r"[A-Za-z0-9._%+-]+@[A-Za-z0-9._%+-]+\.[A-Za-z]{2,}", body
+            )
+            return matches[0] if matches else None
+        except Exception:
+            return None
+
     @staticmethod
     def _extract_job_id(url: str) -> str:
         """Extract the job id from a LinkedIn /jobs/view/<id> href."""

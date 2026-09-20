@@ -3,9 +3,13 @@ Settings screen for the JobHunt TUI.
 
 Edits the user configuration (enabled sources, chat model, scoring mode,
 system prompt), shows the oMLX endpoint, and provides the one-time LinkedIn
-browser login flow.
+browser login flow. The LinkedIn block reports the current sign-in state:
+signed out, or signed in as the resolved account email.
 """
 import asyncio
+import logging
+import os
+from typing import Optional
 
 from textual.containers import Container, Vertical
 from textual.widgets import Button, Input, Select, Static, TextArea
@@ -17,8 +21,10 @@ from ...config.user_config import (
     load_user_config,
     save_user_config,
 )
-from ..components import ActionButton, StatusText
+from ..components import ActionButton, ButtonRow, StatusText
 from .base import BaseScreen
+
+logger = logging.getLogger(__name__)
 
 
 class SettingsScreen(BaseScreen):
@@ -26,6 +32,8 @@ class SettingsScreen(BaseScreen):
 
     def __init__(self, database=None) -> None:
         super().__init__(name="settings", database=database)
+        #: Cached signed-in email (None until resolved for the current session).
+        self._linkedin_email: Optional[str] = None
 
     def _get_content(self):
         """Compose the settings body.
@@ -64,7 +72,6 @@ class SettingsScreen(BaseScreen):
             Vertical(
                 Static("LinkedIn login:", classes="section_title"),
                 Static("Sign in through the browser once; the session is reused from cache."),
-                ActionButton("Login to LinkedIn", id="linkedin_login_btn"),
                 self._status("", id="linkedin_status"),
                 id="linkedin_block",
             ),
@@ -73,7 +80,10 @@ class SettingsScreen(BaseScreen):
                 TextArea(id="system_prompt", show_line_numbers=False),
                 id="prompt_block",
             ),
-            ActionButton("Save Config", id="save_config_btn"),
+            ButtonRow(
+                ActionButton("Login to LinkedIn", id="linkedin_login_btn"),
+                ActionButton("Save Config", id="save_config_btn"),
+            ),
             self._status("", id="settings_status"),
             id="settings_content",
         )
@@ -108,8 +118,31 @@ class SettingsScreen(BaseScreen):
         sources_value = self.query_one("#sources_input", Input).value.lower()
         show = "linkedin" in sources_value
         self.query_one("#linkedin_block").display = "block" if show else "none"
-        if not show:
-            self.query_one("#linkedin_status", StatusText).set_message("")
+        if show:
+            self._refresh_linkedin_status(interactive=True)
+        else:
+            self._set_linkedin_status("")
+
+    def _set_linkedin_status(self, message: str, state: str = "") -> None:
+        """Write a message to the LinkedIn status line and restyle it.
+
+        Args:
+            message: The status text to display (markup is sanitized away, so
+                plain strings only).
+            state: The sign-in state CSS class to apply: ``"signed_in"``
+                (green), ``"signed_out"`` (red), or ``""`` for neutral.
+        """
+        status = self.query_one("#linkedin_status", StatusText)
+        status.remove_class("signed_in", "signed_out")
+        if state:
+            status.add_class(state)
+        status.set_message(message)
+
+    def on_screen_resume(self) -> None:
+        """Re-apply the nav highlight and refresh the sign-in state on return."""
+        super().on_screen_resume()
+        if self.is_mounted and self.query_one("#linkedin_block").display:
+            self._refresh_linkedin_status()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle the Save Config and LinkedIn login buttons.
@@ -126,19 +159,28 @@ class SettingsScreen(BaseScreen):
 
     def _login_linkedin(self) -> None:
         """Kick off a one-time LinkedIn browser login in the background."""
-        status = self.query_one("#linkedin_status", StatusText)
-        status.set_message("Launching browser for LinkedIn login...")
+        self._set_linkedin_status("Launching browser for LinkedIn login...")
         self.query_one("#linkedin_login_btn", Button).disabled = True
         self._run_worker(self._async_linkedin_login, "linkedin")
 
     async def _async_linkedin_login(self) -> None:
         """Run the blocking LinkedIn login off the event loop."""
-        status = self.query_one("#linkedin_status", StatusText)
         try:
             await asyncio.to_thread(self._linkedin_login_blocking)
-            status.set_message("LinkedIn logged in. Session saved for headless reuse.")
+            email = await asyncio.to_thread(self._linkedin_session_email_blocking)
+            self._linkedin_email = email
+            if email:
+                self._set_linkedin_status(
+                    f"Signed in as {email}. Session saved for headless reuse.",
+                    "signed_in",
+                )
+            else:
+                self._set_linkedin_status(
+                    "LinkedIn logged in. Session saved for headless reuse.",
+                    "signed_in",
+                )
         except Exception as error:
-            status.set_message(f"LinkedIn login failed: {error}")
+            self._set_linkedin_status(f"LinkedIn login failed: {error}", "signed_out")
         finally:
             self.query_one("#linkedin_login_btn", Button).disabled = False
 
@@ -153,6 +195,81 @@ class SettingsScreen(BaseScreen):
         adapter = LinkedInAdapter()
         adapter.login()
         return True
+
+    def _refresh_linkedin_status(self, interactive: bool = False) -> None:
+        """Reflect the current LinkedIn sign-in state in the status line.
+
+        Shows "Not signed in" when no persisted session exists; otherwise
+        resolves the account email in the background so the block reads, e.g.,
+        "Signed in as user@example.com". Skipped while a login or an earlier
+        lookup is still running. ``interactive`` (typing in the sources input)
+        only performs the cheap session-file check and leaves the browser
+        lookup to mount, resume, or the login flow itself.
+
+        Args:
+            interactive: True when triggered by input editing, in which case
+                the email-resolving worker is not started.
+        """
+        if self._is_busy("linkedin") or self._is_busy("linkedin-status"):
+            return
+        from ...sources.linkedin import LinkedInAdapter
+
+        session_file = getattr(LinkedInAdapter(), "session_file", None)
+        if not session_file or not os.path.exists(session_file):
+            self._linkedin_email = None
+            self._set_linkedin_status(
+                "Not signed in. Sign in once to enable LinkedIn browsing.",
+                "signed_out",
+            )
+            return
+        if self._linkedin_email is not None:
+            self._set_linkedin_status(
+                f"Signed in as {self._linkedin_email}.", "signed_in"
+            )
+            return
+        self._set_linkedin_status("Signed in — resolving account email…")
+        if interactive:
+            return
+        self._run_worker(self._async_refresh_linkedin_status, "linkedin-status")
+
+    async def _async_refresh_linkedin_status(self) -> None:
+        """Resolve the signed-in email off the event loop."""
+        email = await asyncio.to_thread(self._linkedin_session_email_blocking)
+        self.call_after_refresh(self._apply_linkedin_email, email)
+
+    def _linkedin_session_email_blocking(self) -> Optional[str]:
+        """Blocking account-email lookup, run off the event loop.
+
+        Returns:
+            The signed-in account email, or ``None`` when the adapter exposes
+            no lookup or the address could not be determined (logged).
+        """
+        from ...sources.linkedin import LinkedInAdapter
+
+        try:
+            adapter = LinkedInAdapter()
+            lookup = getattr(adapter, "session_email", None)
+            if lookup is None:
+                return None
+            return lookup()
+        except Exception as error:
+            logger.warning("Could not resolve LinkedIn session email: %s", error)
+            return None
+
+    def _apply_linkedin_email(self, email: Optional[str]) -> None:
+        """Render the resolved email without clobbering an in-flight login.
+
+        Args:
+            email: The resolved account email, or ``None`` when unavailable.
+        """
+        self._linkedin_email = email
+        current = str(self.query_one("#linkedin_status", StatusText).content).strip()
+        if current and current != "Signed in — resolving account email…":
+            return
+        if email:
+            self._set_linkedin_status(f"Signed in as {email}.", "signed_in")
+        else:
+            self._set_linkedin_status("Signed in — account email unavailable.")
 
     def _save_config(self) -> None:
         """Validate the form and write it to the user config TOML."""

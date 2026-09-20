@@ -228,6 +228,23 @@ class WorkerMixin:
         return self._require_agent().run_tool("list_jobs")
 
 
+class ButtonRow(Horizontal):
+    """A horizontal row holding a page's action buttons on a single line.
+
+    Wraps the :class:`ActionButton` groups (and, on the Chat/Search screens,
+    the adjacent input) so in-screen actions align at one vertical position
+    instead of stacking. Height is left to the CSS (`height: auto`) so the row
+    never consumes the page's remaining vertical space.
+
+    Args:
+        *args: Positional arguments forwarded to :class:`Horizontal`.
+        **kwargs: Keyword arguments forwarded to :class:`Horizontal`.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+
 class NavBar(Horizontal):
     """Shared navigation bar rendered on every screen.
 
@@ -291,6 +308,7 @@ __all__ = [
     "ActionButton",
     "AgentUnavailableError",
     "WorkerMixin",
+    "ButtonRow",
     "NavBar",
     "NAV_BUTTONS",
 ]
