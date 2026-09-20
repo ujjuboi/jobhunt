@@ -15,7 +15,7 @@ from textual.widgets import Button, Input
 
 from ...config import get_user_config
 from ...db import JobHuntDB
-from ..components import ActionButton, ScrollableTextWindow
+from ..components import ActionButton, ButtonRow, ScrollableTextWindow
 from .base import BaseScreen
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,10 @@ class ChatScreen(BaseScreen):
         return Container(
             self._title("Agent Chat", id="chat_title"),
             ScrollableTextWindow(id="chat_messages"),
-            Input(placeholder="Type your message...", id="chat_input"),
-            ActionButton("Send", id="send_button"),
+            ButtonRow(
+                Input(placeholder="Type your message...", id="chat_input"),
+                ActionButton("Send", id="send_button"),
+            ),
             id="chat_content"
         )
 

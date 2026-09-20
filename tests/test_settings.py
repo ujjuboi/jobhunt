@@ -3,6 +3,7 @@ Settings screen / Config UI tests: mount, populate from config, save.
 oMLX settings and config I/O are stubbed so these run offline.
 """
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 from jobhunt.app import JobHuntApp
@@ -126,6 +127,117 @@ def test_linkedin_login_button_flows(monkeypatch):
     assert calls["logged_in"] is True
 
 
+def test_linkedin_login_button_toggles_with_block(monkeypatch):
+    _stub_deps(monkeypatch)
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#settings_btn")
+            await asyncio.sleep(0.1)
+            screen = app.screen
+            # Default sources (greenhouse, lever, ashby): block and login hidden.
+            assert screen.query_one("#linkedin_login_btn").disabled is True
+            source_input = screen.query_one("#sources_input")
+            source_input.value = "greenhouse, linkedin"
+            screen.on_input_changed(type("Ev", (), {"input": source_input})())
+            assert screen.query_one("#linkedin_block").display is True
+            assert screen.query_one("#linkedin_login_btn").disabled is False
+            source_input.value = "greenhouse"
+            screen.on_input_changed(type("Ev", (), {"input": source_input})())
+            assert screen.query_one("#linkedin_login_btn").disabled is True
+
+    asyncio.run(run())
+
+
+def test_linkedin_status_resolves_when_revealed_by_typing(monkeypatch, tmp_path):
+    """The block hidden at mount and enabled by typing must still resolve.
+
+    Regression: the interactive path used to leave the status stuck on
+    "Signed in — resolving account email…" with no worker started.
+    """
+    _stub_deps(monkeypatch)
+    session = str(tmp_path / "linkedin_session.json")
+    Path(session).write_text("{}")
+
+    class FakeLinkedInAdapter:
+        def __init__(self, session_file=session):
+            self.session_file = session_file
+
+        def session_email(self):
+            return "me@example.com"
+
+    monkeypatch.setattr("jobhunt.sources.linkedin.LinkedInAdapter", FakeLinkedInAdapter)
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#settings_btn")
+            await asyncio.sleep(0.1)
+            screen = app.screen
+            source_input = screen.query_one("#sources_input")
+            source_input.value = "greenhouse, linkedin"
+            screen.on_input_changed(type("Ev", (), {"input": source_input})())
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "resolving" in str(screen.query_one("#linkedin_status").content):
+                    break
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "Signed in as me@example.com" in str(
+                    screen.query_one("#linkedin_status").content
+                ):
+                    break
+            assert "Signed in as me@example.com" in str(
+                screen.query_one("#linkedin_status").content
+            )
+
+    asyncio.run(run())
+
+
+def test_linkedin_status_failed_lookup_is_cached(monkeypatch, tmp_path):
+    """A failed email lookup must not relaunch the browser on every refresh."""
+    _stub_deps(monkeypatch)
+    session = str(tmp_path / "linkedin_session.json")
+    Path(session).write_text("{}")
+
+    class FakeLinkedInAdapter:
+        def __init__(self, session_file=session):
+            self.session_file = session_file
+
+        def session_email(self):
+            calls["lookups"] += 1
+            return None
+
+    calls = {"lookups": 0}
+    monkeypatch.setattr("jobhunt.sources.linkedin.LinkedInAdapter", FakeLinkedInAdapter)
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#settings_btn")
+            await asyncio.sleep(0.1)
+            screen = app.screen
+            screen.query_one("#sources_input").value = "greenhouse, linkedin"
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "account email unavailable" in str(
+                    screen.query_one("#linkedin_status").content
+                ):
+                    break
+            assert calls["lookups"] == 1
+            screen._refresh_linkedin_status()
+            await asyncio.sleep(0.1)
+            screen._refresh_linkedin_status()
+            await asyncio.sleep(0.1)
+            assert calls["lookups"] == 1
+
+    asyncio.run(run())
+
+
 def test_settings_save_writes_user_config(monkeypatch):
     captured = _stub_deps(monkeypatch)
 
@@ -151,3 +263,61 @@ def test_settings_save_writes_user_config(monkeypatch):
     assert cfg.model.chat == "ACustomModel"
     assert cfg.scoring.mode == "llm"
     assert cfg.prompts.system == "Be concise."
+
+
+def test_linkedin_status_shows_not_signed_in(monkeypatch):
+    _stub_deps(monkeypatch)
+    monkeypatch.setattr(
+        "jobhunt.sources.linkedin.LinkedInAdapter",
+        lambda: SimpleNamespace(session_file=None),
+    )
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#settings_btn")
+            await asyncio.sleep(0.1)
+            screen = app.screen
+            source_input = screen.query_one("#sources_input")
+            source_input.value = "greenhouse, linkedin"
+            screen.on_input_changed(type("Ev", (), {"input": source_input})())
+            status = screen.query_one("#linkedin_status")
+            assert "Not signed in" in str(status.content)
+            assert status.has_class("signed_out")
+
+    asyncio.run(run())
+
+
+def test_linkedin_status_shows_signed_in_email(monkeypatch, tmp_path):
+    _stub_deps(monkeypatch)
+    session = str(tmp_path / "linkedin_session.json")
+    Path(session).write_text("{}")
+
+    class FakeLinkedInAdapter:
+        def __init__(self, session_file=session):
+            self.session_file = session_file
+
+        def session_email(self):
+            return "me@example.com"
+
+    monkeypatch.setattr("jobhunt.sources.linkedin.LinkedInAdapter", FakeLinkedInAdapter)
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#settings_btn")
+            await asyncio.sleep(0.1)
+            screen = app.screen
+            screen.query_one("#sources_input").value = "greenhouse, linkedin"
+            screen._refresh_linkedin_status()
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "me@example.com" in str(screen.query_one("#linkedin_status").content):
+                    break
+            status = screen.query_one("#linkedin_status")
+            assert "Signed in as me@example.com" in str(status.content)
+            assert status.has_class("signed_in")
+
+    asyncio.run(run())

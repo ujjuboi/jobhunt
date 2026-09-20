@@ -35,6 +35,28 @@
     height: 1fr;
 }
 
+/* Keep each page's action buttons aligned on a single row.
+   The row is height-expanding by default in Textual, so it must be
+   collapsed to auto to avoid eating the page's vertical space. */
+ButtonRow {
+    height: auto;
+    margin-top: 1;
+}
+
+ButtonRow > Button {
+    margin: 0 1 0 0;
+}
+
+ButtonRow > Button:last-child {
+    margin-right: 0;
+}
+
+/* The input defaults to 100% width, which would push the paired
+   action button off screen when both share a row. */
+ButtonRow > Input {
+    width: 1fr;
+}
+
 /* Keep the settings prompt editor compact so it never overlaps
    the blocks above it (LinkedIn login, buttons, etc.). */
 #system_prompt {
@@ -43,6 +65,20 @@
 
 #linkedin_block {
     height: auto;
+}
+
+/* LinkedIn sign-in state colors (applied via the screen's state classes).
+   Neutral/in-progress messages keep the default foreground. */
+#linkedin_status.signed_in {
+    color: $success;
+}
+
+#linkedin_status.signed_out {
+    color: $error;
+}
+
+#linkedin_status {
+    margin-bottom: 1;
 }
 
 HeaderIcon {
@@ -55,7 +91,6 @@ HeaderIcon {
 
 /* Make the chat input area visually distinct from the transcript. */
 #chat_input {
-    margin-top: 1;
     background: $panel;
     border: tall $secondary;
     padding: 0 2;

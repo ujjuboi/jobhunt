@@ -14,6 +14,7 @@ Every screen subclasses `BaseScreen` (`app/screens/base.py`), which provides:
   last (Maximize/Minimize is omitted), and the provider preserves that order without sorting
 - **Navigation bar** — shared `NavBar` component (`app/components.py`) with 7 buttons (Dashboard, Search, Jobs, Fit, Resume, Chat, Settings); the active tab is highlighted via the `active` CSS class, driven by the global `app.active_tab` state
 - **Content area** — `#screen_content` container
+- **Action rows** — every screen's action buttons are grouped in a shared `ButtonRow` component (`app/components.py`, a `Horizontal` with `height: auto`) so all in-screen actions on a page align on a single row. On Chat/Search the row also holds the message/query input next to its button.
 - **Footer**
 - **Status text** — one-line status message via `self._status(text, id=...)` and `set_message()`
 - **Background work** — never block the event loop; use `self._run_worker(coro, group)` from `WorkerMixin` and update the UI with `self.call_after_refresh(...)`
@@ -170,8 +171,13 @@ Configuration UI for sources, models, scoring, and system prompts.
 **Config save:** writes TOML to `~/.config/jobhunt/config.toml` (or `JOBHUNT_CONFIG`
 override path). Updates sources, companies, prompts, model, scoring mode.
 
-**LinkedIn login:** launches a headful browser window for interactive login. Session cookies
-are persisted at `cache/linkedin_session.json` for subsequent headless reuse.
+**LinkedIn login:** the Login button shares the bottom action row with Save Config
+(`#linkedin_login_btn` + `#save_config_btn` in one `ButtonRow`); the collapsible
+`#linkedin_block` reports the current sign-in state: "Not signed in" when no session
+exists, otherwise "Signed in as <account email>" (the email is resolved from the
+persisted session on mount/resume and after login). Login launches a headful browser
+window for interactive login. Session cookies are persisted at
+`cache/linkedin_session.json` for subsequent headless reuse.
 
 ## Screen Navigation
 
