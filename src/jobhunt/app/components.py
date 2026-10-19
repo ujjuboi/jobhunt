@@ -251,6 +251,9 @@ class NavBar(Horizontal):
     The active tab is applied at mount time (first paint) by reading
     ``self.app.active_tab``, and re-applied on every screen resume via
     :meth:`set_active` (called from ``BaseScreen.on_screen_resume``).
+    :meth:`set_active` also moves keyboard focus to the active button so the
+    focus highlight matches the current tab instead of the first nav button,
+    but only when nothing else has focus or focus is already on this nav bar.
 
     Args:
         *args: Positional arguments forwarded to :class:`Horizontal`.
@@ -293,12 +296,34 @@ class NavBar(Horizontal):
 
         Called by ``BaseScreen.on_screen_resume`` so the highlight stays
         correct across screen switches even for already-mounted nav bars.
+        Also moves keyboard focus to the active button: Textual otherwise
+        auto-focuses the first focusable widget of the new screen (the
+        Dashboard button), leaving the focus highlight on the wrong tab.
 
         Args:
             screen_name: The screen name to mark as active.
         """
         self.app.active_tab = screen_name
         self._apply_active()
+        self._focus_active()
+
+    def _focus_active(self) -> None:
+        """Move keyboard focus to the active tab's button when appropriate.
+
+        Focus is only moved when nothing is focused or focus is already on
+        this nav bar. A screen also resumes when a screen pushed on top of it
+        is dismissed (for example the command palette), and in that case a
+        focused input must keep focus instead of being replaced by the nav
+        bar.
+        """
+        focused = self.app.focused
+        if focused is not None and not any(
+            focused is button for button in self.query(Button)
+        ):
+            return
+        active_button = self.query(Button).filter(".active").first()
+        if active_button is not None and active_button.can_focus:
+            active_button.focus()
 
 
 __all__ = [
