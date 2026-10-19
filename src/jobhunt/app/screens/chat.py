@@ -12,12 +12,12 @@ import threading
 from typing import List, Dict
 
 from rich.markup import escape
-from textual.containers import Container, Horizontal
+from textual.containers import Container
 from textual.widgets import Button, Input, RichLog
 
 from ...config import get_user_config
 from ...db import JobHuntDB
-from ..components import ActionButton
+from ..components import ActionButton, ButtonRow
 from .base import BaseScreen
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,8 @@ class ChatScreen(BaseScreen):
         return Container(
             self._title("Agent Chat", id="chat_title"),
             RichLog(id="chat_messages", markup=True, wrap=True),
-            Input(placeholder="Type your message...", id="chat_input"),
-            Horizontal(
+            ButtonRow(
+                Input(placeholder="Type your message...", id="chat_input"),
                 ActionButton("Send", id="send_button"),
                 ActionButton("Stop", id="stop_button", disabled=True),
             ),

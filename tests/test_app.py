@@ -3,7 +3,7 @@ Phase 1 tests: app mount, navigation, tool registry, lazy config.
 """
 import asyncio
 
-from textual.widgets import Static, Button
+from textual.widgets import Input, Static
 
 from jobhunt.app import JobHuntApp
 from jobhunt.app import components as components_module
@@ -347,5 +347,62 @@ def test_commands_provider_preserves_order():
             assert hits[1].text == "Theme"
             assert hits[2].text == "Screenshot"
             assert hits[3].text == "Quit"
+
+    asyncio.run(run())
+
+
+def test_chat_input_has_visible_placeholder():
+    """Chat input must show a visible placeholder styled with $primary + italic."""
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_btn")
+            await asyncio.sleep(0.1)
+            assert isinstance(app.screen, ChatScreen)
+            chat_input = app.screen.query_one("#chat_input", Input)
+            assert chat_input.placeholder == "Type your message..."
+            placeholder_style = chat_input.get_component_rich_style("input--placeholder")
+            assert placeholder_style.color is not None
+            assert placeholder_style.italic is True
+
+    asyncio.run(run())
+
+
+def test_dashboard_action_buttons_share_a_row():
+    """Dashboard quick-action buttons must align on a single row."""
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            button_ids = (
+                "#search_jobs_btn",
+                "#view_jobs_btn",
+                "#generate_resume_btn",
+            )
+            buttons = [pilot.app.screen.query_one(button_id) for button_id in button_ids]
+            rows = {button.region.y for button in buttons}
+            columns = sorted(button.region.x for button in buttons)
+            assert len(rows) == 1
+            assert columns[0] < columns[1] < columns[2]
+
+    asyncio.run(run())
+
+
+def test_chat_input_and_send_share_a_row():
+    """Chat input and Send button must sit on the same row."""
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_btn")
+            await asyncio.sleep(0.1)
+            assert isinstance(app.screen, ChatScreen)
+            input_y = app.screen.query_one("#chat_input").region.y
+            send_y = app.screen.query_one("#send_button").region.y
+            assert input_y == send_y
 
     asyncio.run(run())

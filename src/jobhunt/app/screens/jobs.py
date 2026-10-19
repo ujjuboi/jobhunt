@@ -11,7 +11,7 @@ from textual.containers import Container
 from textual.widgets import Button, DataTable
 
 from ...db import JobHuntDB
-from ..components import ActionButton, StatusText
+from ..components import ActionButton, ButtonRow, StatusText
 from .base import BaseScreen
 
 
@@ -32,7 +32,7 @@ class JobsScreen(BaseScreen):
             self._title("Job Listings", id="jobs_title"),
             DataTable(id="jobs_table"),
             self._status("", id="jobs_status"),
-            ActionButton("Refresh", id="refresh_button"),
+            ButtonRow(ActionButton("Refresh", id="refresh_button")),
             id="jobs_content"
         )
 

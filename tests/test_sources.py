@@ -3,6 +3,8 @@ Source adapter tests: field mapping, date parsing, dedupe-safe tags, and
 Playwright adapters' URL/id extraction. HTTP is mocked so the API-based
 tests run offline against fixture payloads.
 """
+from pathlib import Path
+
 import httpx
 
 from jobhunt.sources import get_source_adapter
@@ -234,3 +236,79 @@ def test_indeed_extracts_job_id():
     assert adapter._extract_job_id("/viewjob?jk=abc123") == "abc123"
     assert adapter._extract_job_id("https://www.indeed.com/rc/clk?jk=def456") == "def456"
     assert adapter._extract_job_id("") == ""
+
+
+def test_linkedin_session_email_none_without_session(tmp_path):
+    """Without a persisted session there can be no account email."""
+    adapter = LinkedInAdapter(session_file=str(tmp_path / "missing.json"))
+    assert adapter.session_email() is None
+
+
+def test_linkedin_session_email_resolves_from_me_payload(monkeypatch, tmp_path):
+    """session_email must resolve the account from the me payload when signed in."""
+    import jobhunt.sources.linkedin as linkedin_module
+
+    session = str(tmp_path / "linkedin_session.json")
+    Path(session).write_text("{}")
+
+    class FakeResponse:
+        ok = True
+
+        def text(self):
+            return '{"emailAddress": "me@example.com"}'
+
+    class FakeRequest:
+        def get(self, url, headers=None, timeout=None):
+            return FakeResponse()
+
+    class FakePage:
+        def set_default_timeout(self, timeout):
+            pass
+
+    class FakeContext:
+        def new_page(self):
+            return FakePage()
+
+        def cookies(self):
+            return [{"name": "JSESSIONID", "value": '"token"'}]
+
+        @property
+        def request(self):
+            return FakeRequest()
+
+        def storage_state(self, path=None):
+            pass
+
+    class FakeBrowser:
+        def __init__(self, headless):
+            behavior["headless"] = headless
+
+        def new_context(self, storage_state=None):
+            return FakeContext()
+
+        def close(self):
+            behavior["closed"] = True
+
+    class FakeChromium:
+        def launch(self, **kwargs):
+            return FakeBrowser(kwargs.get("headless"))
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        def stop(self):
+            behavior["stopped"] = True
+
+    class FakeManager:
+        def start(self):
+            return FakePlaywright()
+
+    behavior = {}
+    monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: FakeManager())
+
+    adapter = LinkedInAdapter(session_file=session)
+    assert adapter.session_email() == "me@example.com"
+    assert behavior["headless"] is True
+    assert behavior["closed"] is True
+    assert behavior["stopped"] is True

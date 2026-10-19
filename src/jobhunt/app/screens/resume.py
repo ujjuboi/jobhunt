@@ -11,7 +11,7 @@ from textual.containers import Container
 from textual.widgets import Button, Select, Static
 
 from jobhunt.resume import ResumeManager
-from ..components import ActionButton, ScrollableTextWindow, StatusText
+from ..components import ActionButton, ButtonRow, ScrollableTextWindow, StatusText
 from .base import BaseScreen
 
 logger = logging.getLogger(__name__)
@@ -46,9 +46,11 @@ class ResumeScreen(BaseScreen):
             ),
             self._status("", id="resume_status"),
             ScrollableTextWindow(id="resume_preview"),
-            ActionButton("Generate Tailored Resume", id="generate_tailored_btn", disabled=True),
-            ActionButton("Generate Cover Letter", id="generate_cover_letter_btn", disabled=True),
-            ActionButton("Save to Outputs", id="save_outputs_btn", disabled=True),
+            ButtonRow(
+                ActionButton("Generate Tailored Resume", id="generate_tailored_btn", disabled=True),
+                ActionButton("Generate Cover Letter", id="generate_cover_letter_btn", disabled=True),
+                ActionButton("Save to Outputs", id="save_outputs_btn", disabled=True),
+            ),
             id="resume_content",
         )
 

@@ -5,7 +5,7 @@ Shows an overview: total job/application counts, recent activity, and quick
 links into the Search, Jobs, and Resume screens.
 """
 from ...db import JobHuntDB
-from ..components import ActionButton, StatusText
+from ..components import ActionButton, ButtonRow, StatusText
 from .base import BaseScreen
 from textual.containers import Container
 from textual.widgets import Static
@@ -66,9 +66,11 @@ class DashboardScreen(BaseScreen):
             Static("", id="activity_container"),
             Static(""),
             self._title("Quick Actions:", id="actions_title"),
-            ActionButton("Search Jobs", id="search_jobs_btn"),
-            ActionButton("View Jobs", id="view_jobs_btn"),
-            ActionButton("Generate Resume", id="generate_resume_btn"),
+            ButtonRow(
+                ActionButton("Search Jobs", id="search_jobs_btn"),
+                ActionButton("View Jobs", id="view_jobs_btn"),
+                ActionButton("Generate Resume", id="generate_resume_btn"),
+            ),
             id="dashboard_content"
         )
 

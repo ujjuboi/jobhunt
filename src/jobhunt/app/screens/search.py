@@ -19,7 +19,7 @@ from ...config.user_config import (
 )
 from ...db import JobHuntDB
 from ...models import Job
-from ..components import ActionButton, ScrollableTextWindow, StatusText
+from ..components import ActionButton, ButtonRow, ScrollableTextWindow, StatusText
 from .base import BaseScreen
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,10 @@ class SearchScreen(BaseScreen):
         return Container(
             self._title("Job Search", id="search_title"),
             Static("Enter your search criteria:"),
-            Input(placeholder="Job title, keywords, company...", id="search_input"),
-            ActionButton("Search / Refresh", id="search_button"),
+            ButtonRow(
+                Input(placeholder="Job title, keywords, company...", id="search_input"),
+                ActionButton("Search / Refresh", id="search_button"),
+            ),
             self._status("", id="search_results_title"),
             ScrollableTextWindow(id="search_results"),
             id="search_content"
