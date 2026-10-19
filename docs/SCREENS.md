@@ -108,14 +108,14 @@ Resume generation, tailoring, and cover-letter workflow.
 
 | Widget ID | Type | Purpose |
 |---|---|---|
-| `#resume_select` | Select | Pick a base DOCX from `../Resumes/` |
+| `#resume_select` | Select | Pick a base DOCX from `../../Resumes/` |
 | `#resume_preview` | ScrollableTextWindow | Profile preview (keeps a usable scroll viewport) |
 | `#resume_status` | StatusText | Status messages |
 | `#generate_tailored_btn` | Button | Generate tailored resume |
 | `#generate_cover_letter_btn` | Button | Generate cover letter |
 | `#save_outputs_btn` | Button | Save artifacts to `outputs/` |
 
-**DOCX parsing:** selects a `.docx` from `../Resumes/` (sibling to project root). Parses
+**DOCX parsing:** selects a `.docx` from `../../Resumes/` (two levels up from project root). Parses
 into a structured `Profile`, JSON-caches at `cache/resume/{filename}.json`, and auto-saves
 to the DB for fit scoring.
 

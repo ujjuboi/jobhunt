@@ -20,7 +20,7 @@ class ResumeManager:
 
     def __init__(
         self,
-        base_resume_dir: str = "../Resumes/",
+        base_resume_dir: str = "../../Resumes/",
         cache_dir: str = "cache/resume",
         outputs_dir: str = "outputs",
     ):

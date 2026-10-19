@@ -28,9 +28,9 @@ def test_resume_manager_missing_dir(tmp_path):
 
 
 def test_resume_manager_uses_real_resumes_dir():
-    """ResumeManager resolves ../Resumes/ relative to the project root."""
+    """ResumeManager resolves ../../Resumes/ relative to the project root."""
     manager = ResumeManager()
-    assert manager.base_resume_dir == (PROJECT_ROOT / ".." / "Resumes").resolve()
+    assert manager.base_resume_dir == (PROJECT_ROOT / ".." / ".." / "Resumes").resolve()
 
 
 def test_resume_manager_api_surface():
