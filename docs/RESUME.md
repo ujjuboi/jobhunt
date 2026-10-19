@@ -137,7 +137,7 @@ filesystem-safe paths.
 
 The ResumeScreen orchestrates the full workflow:
 
-1. **DOCX selection** — dropdown picks a `.docx` from `../Resumes/` (sibling to project root)
+1. **DOCX selection** — dropdown picks a `.docx` from `../../Resumes/` (two levels up from project root)
 2. **Profile loading** — parses DOCX, caches JSON, displays preview in `#resume_preview`
 3. **Auto-sync** — saves profile to DB for fit scoring
 4. **Job selection** — uses `app.selected_job_id` set by the Jobs screen

@@ -92,12 +92,13 @@ Logs are written to stderr and to `~/.config/jobhunt/logs/jobhunt.log`.
 
 ## 4. Resume setup
 
-Your base resume `.docx` files live in `../Resumes/`, a sibling directory next to
-the project folder:
+Your base resume `.docx` files live in `../../Resumes/`, a sibling directory two
+levels up from the project folder:
 
 ```
 Documents/Study/projects/python/
-├── jobhunt/        # this project
+├── jobhunt/
+│   └── once/       # this project
 └── Resumes/
     └── my-resume.docx
 ```
@@ -225,7 +226,7 @@ Other data locations:
 | Chat shows a connection error | oMLX briefly unavailable — retries handle short outages; otherwise start oMLX and retry. |
 | Fit says "no profile found" | Select your resume on the Resume screen to sync your profile. |
 | Fit/Resume prompt to select a job | Choose a job row on the Jobs screen first. |
-| "Base resume directory not found" | Create the `../Resumes/` sibling folder and put your `.docx` resume(s) there. |
+| "Base resume directory not found" | Create the `../../Resumes/` sibling folder and put your `.docx` resume(s) there. |
 | No `.pdf` in outputs | LibreOffice isn't installed; the `.docx` is still saved. Run `brew install libreoffice`. |
 | LinkedIn source errors | Log in again via Settings → Login to LinkedIn (a browser opens so you can sign in); install the Playwright browser; delete `cache/linkedin_session.json` if the session is stale. |
 | Playwright/Chromium errors | Run `uv run playwright install chromium`. |
