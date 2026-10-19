@@ -167,12 +167,19 @@ def complete(messages: List[Dict[str, str]], model: Optional[str] = None, **kwar
     (temperature, response_format, ...) are forwarded.
     """
     client = _build_client()
+    resolved_model = model or get_default_model("chat")
+    started = time.monotonic()
     response = client.chat.completions.create(
-        model=model or get_default_model("chat"),
+        model=resolved_model,
         messages=messages,
         **kwargs,
     )
-    return response.choices[0].message.content or ""
+    reply = response.choices[0].message.content or ""
+    logger.info(
+        "LLM complete: model=%s messages=%d -> %d chars in %.2fs",
+        resolved_model, len(messages), len(reply), time.monotonic() - started,
+    )
+    return reply
 
 
 def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs: Any) -> Iterator[str]:
@@ -182,13 +189,16 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
     sees an uninterrupted sequence of deltas. Non-transient errors propagate.
     """
     attempts = 0
+    resolved_model = model or get_default_model("chat")
+    started = time.monotonic()
+    logger.info("LLM stream start: model=%s messages=%d", resolved_model, len(messages))
     # Keep track of what's already been yielded to avoid duplication on restart
     seen_content = ""
     while True:
         try:
             client = _build_client()
             response = client.chat.completions.create(
-                model=model or get_default_model("chat"),
+                model=resolved_model,
                 messages=messages,
                 stream=True,
                 **kwargs,
@@ -204,6 +214,10 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
                         if content_to_yield:
                             seen_content += content_to_yield
                             yield content_to_yield
+            logger.info(
+                "LLM stream done: model=%s -> %d chars in %.2fs",
+                resolved_model, len(seen_content), time.monotonic() - started,
+            )
             return
         except Exception as error:
             status = getattr(error, "status_code", None)

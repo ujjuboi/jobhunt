@@ -100,3 +100,35 @@ HeaderIcon {
     color: $primary;
     text-style: italic;
 }
+
+/* Right-side log panel, docked on every screen. Toggle with ctrl+l.
+   It is a sibling of the header/nav/content/footer column, so neither the
+   header nor the footer is covered. */
+#screen_root {
+    height: 1fr;
+}
+
+#screen_main {
+    width: 1fr;
+}
+
+#log_panel {
+    dock: right;
+    width: 40;
+    background: $panel;
+    border-left: solid $secondary;
+    padding: 0 1;
+}
+
+#log_panel_title {
+    width: 1fr;
+    height: 3;
+    content-align: left middle;
+    text-style: bold;
+    color: $text;
+}
+
+#log_lines {
+    height: 1fr;
+    background: $surface;
+}

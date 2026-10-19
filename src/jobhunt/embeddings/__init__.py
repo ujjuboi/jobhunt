@@ -82,6 +82,7 @@ class EmbeddingClient:
             if use_bge_prefix:
                 payload = f"{BGE_QUERY_PREFIX}{text}"
 
+            resolved_model = model or llm.get_default_model("embedding")
             response = _retry_post(
                 self.client,
                 f"{self.base_url}/embeddings",
@@ -90,7 +91,7 @@ class EmbeddingClient:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": model or llm.get_default_model("embedding"),
+                    "model": resolved_model,
                     "input": [payload],
                     "encoding_format": "float",
                 },
@@ -99,6 +100,9 @@ class EmbeddingClient:
             if response.status_code == 200:
                 data = response.json()
                 embedding = data["data"][0]["embedding"]
+                logger.info(
+                    "Embedding complete: model=%s dims=%d", resolved_model, len(embedding)
+                )
                 return self.normalize_embedding(embedding)
             else:
                 logger.error("Embedding API error: %s - %s", response.status_code, response.text)
@@ -119,6 +123,7 @@ class EmbeddingClient:
             if use_bge_prefix:
                 texts = [f"{BGE_QUERY_PREFIX}{t}" for t in texts]
 
+            resolved_model = model or llm.get_default_model("embedding")
             response = _retry_post(
                 self.client,
                 f"{self.base_url}/embeddings",
@@ -127,7 +132,7 @@ class EmbeddingClient:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": model or llm.get_default_model("embedding"),
+                    "model": resolved_model,
                     "input": texts,
                     "encoding_format": "float",
                 },
@@ -138,6 +143,10 @@ class EmbeddingClient:
                 # The API keys items by index; ordering is not guaranteed.
                 items = sorted(data["data"], key=lambda item: item.get("index", 0))
                 embeddings = [item["embedding"] for item in items]
+                logger.info(
+                    "Batch embedding complete: model=%s texts=%d dims=%d",
+                    resolved_model, len(embeddings), len(embeddings[0]) if embeddings else 0,
+                )
                 return [self.normalize_embedding(v) for v in embeddings]
             else:
                 logger.error("Batch embedding API error: %s - %s", response.status_code, response.text)
