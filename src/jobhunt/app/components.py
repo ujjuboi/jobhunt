@@ -19,11 +19,12 @@ import time
 from typing import Optional
 
 from rich.text import Text
+from textual.app import ScreenStackError
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, RichLog, Static, TextArea
 
 from ..agent import JobHuntAgent
-from ..logging import get_tui_handler
+from ..logging import TUI_LOG_BUFFER_SIZE, get_tui_handler
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,8 @@ class LogPanel(Vertical):
     The panel is a view over one application-wide stream: every screen replays
     the full buffered history on mount, so the log is persistent and identical
     across tabs. The reading position (following the tail, or a scrolled-up
-    offset) is remembered on the app and restored when a screen remounts.
+    offset) is shared through the app: only the panel on the visible screen
+    records it, and it is re-applied whenever a screen becomes visible again.
 
     Args:
         *args: Positional arguments forwarded to :class:`Vertical`.
@@ -161,6 +163,7 @@ class LogPanel(Vertical):
         yield Static("Logs", id="log_panel_title")
         yield RichLog(
             id="log_lines",
+            max_lines=TUI_LOG_BUFFER_SIZE,
             min_width=1,
             wrap=True,
             highlight=False,
@@ -188,6 +191,17 @@ class LogPanel(Vertical):
         ):
             return
         self._remember_view(log_lines)
+
+    def restore_shared_view(self) -> None:
+        """Re-apply the app-wide reading position after this panel is shown.
+
+        Installed screens are suspended rather than unmounted when tabs
+        switch, so the panel is not rebuilt and its ``on_mount`` restore does
+        not run again. Screens call this from their resume handler to keep the
+        panel in sync with the shared reading position.
+        """
+        self._restore_pending = True
+        self._drain()
 
     def _drain(self) -> None:
         """Restore the remembered view, then append newly logged records."""
@@ -234,11 +248,30 @@ class LogPanel(Vertical):
     def _remember_view(self, log_lines: RichLog) -> None:
         """Store whether the viewer is following the tail and its offset.
 
+        Only the panel on the currently visible screen records, so a suspended
+        screen cannot overwrite the shared reading position from the panel it
+        keeps mounted.
+
         Args:
             log_lines: The log viewer whose position should be recorded.
         """
+        if not self._is_active():
+            return
         setattr(self.app, "log_follow_tail", log_lines.is_vertical_scroll_end)
         setattr(self.app, "log_scroll_y", int(log_lines.scroll_y))
+
+    def _is_active(self) -> bool:
+        """Whether this panel belongs to the screen currently on display.
+
+        Returns:
+            ``True`` when this panel's screen is the app's active screen, and
+            ``False`` while the app is shutting down (the screen stack can be
+            empty while the poll interval is still firing).
+        """
+        try:
+            return self.app.screen is self.screen
+        except ScreenStackError:
+            return False
 
     @staticmethod
     def _format_record(record: logging.LogRecord) -> Text:
@@ -248,7 +281,8 @@ class LogPanel(Vertical):
             record: The log record to format.
 
         Returns:
-            A styled ``Text`` line: ``HH:MM:SS LEVEL logger: message``.
+            A styled ``Text`` line: ``HH:MM:SS LEVEL logger: message``, with
+            any exception traceback appended after the message.
         """
         timestamp = time.strftime("%H:%M:%S", time.localtime(record.created))
         level_style = LEVEL_STYLES.get(record.levelname, "")
@@ -258,6 +292,12 @@ class LogPanel(Vertical):
         text.append(f"{record.levelname:<8} ", style=level_style)
         text.append(f"{record.name}: ", style="dim cyan")
         text.append(record.getMessage(), style=message_style)
+        if record.exc_info:
+            text.append("\n")
+            text.append(
+                logging.Formatter().formatException(record.exc_info),
+                style=message_style,
+            )
         return text
 
 

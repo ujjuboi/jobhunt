@@ -3,7 +3,7 @@ Phase 1 tests: app mount, navigation, tool registry, lazy config.
 """
 import asyncio
 
-from textual.widgets import Input, Static
+from textual.widgets import Button, Input, Static
 
 from jobhunt.app import JobHuntApp
 from jobhunt.app import components as components_module

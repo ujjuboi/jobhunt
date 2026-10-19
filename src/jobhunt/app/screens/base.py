@@ -74,11 +74,16 @@ class BaseScreen(WorkerMixin, Screen):
         The NavBar mounts once per screen, so re-applying on every resume keeps
         the highlight correct even for screens that are already mounted. The
         NavBar may not be mounted yet on the first visit; ``on_mount`` covers
-        that case.
+        that case. Installed screens are suspended rather than unmounted when
+        tabs switch, so the log panel is also asked to re-sync its reading
+        position with the shared one.
         """
         nav_bar = self.query(NavBar).first()
         if nav_bar is not None:
             nav_bar.set_active(self.screen_name)
+        log_panel = self.query(LogPanel).first()
+        if log_panel is not None:
+            log_panel.restore_shared_view()
 
     def _get_content(self):
         """Override this in subclasses to provide specific content.

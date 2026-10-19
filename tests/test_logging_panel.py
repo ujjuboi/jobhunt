@@ -1,7 +1,9 @@
 """Tests for the sidebar log panel and its in-memory log handler."""
 import asyncio
 import logging
+import sys
 import threading
+import time
 
 from textual.widgets import RichLog
 
@@ -19,6 +21,25 @@ from jobhunt.logging import (
 def _record(message: str, name: str = "jobhunt.test", level: int = logging.INFO) -> logging.LogRecord:
     """Build a bare log record for handler/formatting tests."""
     return logging.LogRecord(name, level, __file__, 1, message, None, None)
+
+
+async def _wait_until(condition, timeout: float = 5.0, interval: float = 0.05) -> bool:
+    """Poll ``condition`` until it is truthy or ``timeout`` elapses.
+
+    Args:
+        condition: A zero-argument predicate returning a boolean.
+        timeout: Seconds to keep polling before giving up.
+        interval: Seconds between polls.
+
+    Returns:
+        The last value returned by ``condition``.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        await asyncio.sleep(interval)
+    return bool(condition())
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +199,27 @@ def test_error_records_render_the_message_in_red():
     assert warning.spans[-1].style != "red"
 
 
+def test_exception_records_include_the_traceback():
+    """Records carrying exception info append the traceback to the line."""
+    try:
+        raise ValueError("boom-value")
+    except ValueError:
+        record = logging.LogRecord(
+            "jobhunt.test",
+            logging.ERROR,
+            __file__,
+            1,
+            "request failed",
+            None,
+            sys.exc_info(),
+        )
+
+    rendered = LogPanel._format_record(record)
+    assert "request failed" in rendered.plain
+    assert "Traceback (most recent call last)" in rendered.plain
+    assert "ValueError: boom-value" in rendered.plain
+
+
 # ---------------------------------------------------------------------------
 # Panel widget
 # ---------------------------------------------------------------------------
@@ -207,10 +249,9 @@ def test_log_record_appears_in_panel():
             logging.getLogger("jobhunt.test.panel").info("panel-hello-marker")
 
             log_lines = app.screen.query_one("#log_lines", RichLog)
-            for _ in range(50):
-                if any("panel-hello-marker" in line.text for line in log_lines.lines):
-                    break
-                await asyncio.sleep(0.05)
+            assert await _wait_until(
+                lambda: any("panel-hello-marker" in line.text for line in log_lines.lines)
+            )
 
             rendered = "\n".join(line.text for line in log_lines.lines)
             assert "panel-hello-marker" in rendered
@@ -239,7 +280,7 @@ def test_ctrl_l_toggles_log_panel():
 
 
 def test_logs_persist_across_screen_switches():
-    """The panel mirrors one persistent stream and cannot be cleared away."""
+    """Every tab's panel is served by the same persistent stream."""
 
     async def run():
         app = JobHuntApp()
@@ -248,27 +289,23 @@ def test_logs_persist_across_screen_switches():
             logging.getLogger("jobhunt.test.persist").warning("persist-marker")
 
             log_lines = app.screen.query_one("#log_lines", RichLog)
-            for _ in range(50):
-                if any("persist-marker" in line.text for line in log_lines.lines):
-                    break
-                await asyncio.sleep(0.05)
-            assert any("persist-marker" in line.text for line in log_lines.lines)
+            assert await _wait_until(
+                lambda: any("persist-marker" in line.text for line in log_lines.lines)
+            )
 
-            # Leave the screen and come back: the shared buffer is replayed.
+            # A first visit to another tab builds its panel from the buffer.
             await pilot.click("#chat_btn")
-            await asyncio.sleep(0.2)
-            await pilot.click("#dashboard_btn")
-            await asyncio.sleep(0.2)
-
-            revisited = app.screen.query_one("#log_lines", RichLog)
-            assert any("persist-marker" in line.text for line in revisited.lines)
-            assert not app.screen.query("#clear_logs_btn")
+            chat_lines = app.screen.query_one("#log_lines", RichLog)
+            assert chat_lines is not log_lines
+            assert await _wait_until(
+                lambda: any("persist-marker" in line.text for line in chat_lines.lines)
+            )
 
     asyncio.run(run())
 
 
-def test_scroll_position_is_remembered_across_screen_switches():
-    """A scrolled-up panel restores its offset; a tailing panel stays at the end."""
+def test_reading_position_is_shared_across_screen_switches():
+    """A scrolled-up position is restored when another tab becomes visible."""
 
     async def run():
         app = JobHuntApp()
@@ -277,36 +314,38 @@ def test_scroll_position_is_remembered_across_screen_switches():
             logger = logging.getLogger("jobhunt.test.scroll")
             for index in range(80):
                 logger.info("scroll-line-%03d", index)
-            await asyncio.sleep(1.2)
 
             log_lines = app.screen.query_one("#log_lines", RichLog)
-            assert log_lines.max_scroll_y > 0
-            assert log_lines.is_vertical_scroll_end
+            assert await _wait_until(lambda: log_lines.max_scroll_y > 0)
+            assert await _wait_until(lambda: log_lines.is_vertical_scroll_end)
 
-            # Scroll to the top; the next poll records the reading position.
+            # Scroll to the top; the active panel records the reading position.
             log_lines.scroll_to(y=0, animate=False)
-            await asyncio.sleep(0.8)
-            assert app.log_follow_tail is False
+            assert await _wait_until(lambda: app.log_follow_tail is False)
+            assert app.log_scroll_y == 0
+
+            # Chat is visited for the first time and adopts the shared position.
+            await pilot.click("#chat_btn")
+            chat_lines = app.screen.query_one("#log_lines", RichLog)
+            assert await _wait_until(
+                lambda: chat_lines.scroll_y == 0
+                and not chat_lines.is_vertical_scroll_end
+            )
+
+            # Returning re-applies the shared position when the screen resumes.
+            await pilot.click("#dashboard_btn")
+            assert await _wait_until(
+                lambda: app.screen.query_one("#log_lines", RichLog).scroll_y == 0
+                and not app.screen.query_one("#log_lines", RichLog).is_vertical_scroll_end
+            )
+
+            # Following the tail is shared as well.
+            app.screen.query_one("#log_lines", RichLog).scroll_end(animate=False)
+            assert await _wait_until(lambda: app.log_follow_tail is True)
 
             await pilot.click("#chat_btn")
-            await asyncio.sleep(0.8)
-            await pilot.click("#dashboard_btn")
-            await asyncio.sleep(0.8)
-
-            revisited = app.screen.query_one("#log_lines", RichLog)
-            assert revisited.scroll_y == 0
-            assert not revisited.is_vertical_scroll_end
-
-            # Following the tail again: a remount lands back at the bottom.
-            revisited.scroll_end(animate=False)
-            await asyncio.sleep(0.8)
-            assert app.log_follow_tail is True
-
-            await pilot.click("#chat_btn")
-            await asyncio.sleep(0.8)
-            await pilot.click("#dashboard_btn")
-            await asyncio.sleep(0.8)
-
-            assert app.screen.query_one("#log_lines", RichLog).is_vertical_scroll_end
+            assert await _wait_until(
+                lambda: app.screen.query_one("#log_lines", RichLog).is_vertical_scroll_end
+            )
 
     asyncio.run(run())

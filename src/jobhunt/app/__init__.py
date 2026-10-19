@@ -93,7 +93,6 @@ class JobHuntApp(App):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         setup_logging()
-        redirect_logs_to_tui()
         self.selected_job_id = None
         self.active_tab: str = "dashboard"
         #: Whether the sidebar log panel is shown (read by :class:`LogPanel`).
@@ -131,6 +130,7 @@ class JobHuntApp(App):
 
     def on_mount(self):
         """Install and show the initial screen when the app is mounted."""
+        redirect_logs_to_tui()
         self.install_screen(DashboardScreen(database=self.database), name="dashboard")
         self.install_screen(SearchScreen(database=self.database), name="search")
         self.install_screen(JobsScreen(database=self.database), name="jobs")

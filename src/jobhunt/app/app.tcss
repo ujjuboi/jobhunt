@@ -114,7 +114,9 @@ HeaderIcon {
 
 #log_panel {
     dock: right;
-    width: 40;
+    width: 33%;
+    min-width: 24;
+    max-width: 40;
     background: $panel;
     border-left: solid $secondary;
     padding: 0 1;
