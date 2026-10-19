@@ -35,6 +35,20 @@
     height: 1fr;
 }
 
+/* The resume screen stacks more fixed-height chrome (title, label, Select,
+   status, button row) than other screens, so its flexible preview can be
+   squeezed to zero rows on short terminals. Keep a usable scroll viewport. */
+#resume_preview {
+    height: 1fr;
+    min-height: 5;
+}
+
+/* When the preview's min-height pushes the action buttons off the bottom on
+   short terminals, let the resume page scroll instead of clipping them. */
+#resume_content {
+    overflow-y: auto;
+}
+
 /* Keep each page's action buttons aligned on a single row.
    The row is height-expanding by default in Textual, so it must be
    collapsed to auto to avoid eating the page's vertical space. */

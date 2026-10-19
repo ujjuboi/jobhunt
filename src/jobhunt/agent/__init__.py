@@ -460,7 +460,7 @@ class JobHuntAgent:
         return llm.complete(
             messages,
             model=self._resolve_model(model),
-            temperature=0.1,
+            temperature=0.7,
         )
 
     def chat_stream(
@@ -478,7 +478,7 @@ class JobHuntAgent:
         return llm.stream(
             messages,
             model=self._resolve_model(model),
-            temperature=0.1,
+            temperature=0.7,
         )
 
     def chat_with_agent(
