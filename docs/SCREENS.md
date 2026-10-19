@@ -20,7 +20,7 @@ Every screen subclasses `BaseScreen` (`app/screens/base.py`), which provides:
 - **Background work** — never block the event loop; use `self._run_worker(coro, group)` from `WorkerMixin` and update the UI with `self.call_after_refresh(...)`
 - **Busy guard** — re-entry is prevented with `self._is_busy(group)`
 
-Each screen yields a shared `NavBar` component (`app/components.py`) from its `compose()` method. The active tab is updated globally in `JobHuntApp.switch_screen()` before the new screen displays. The `NavBar` applies the `active` CSS class to the matching button at mount time (first visit, driven by `app.active_tab`) and re-applies it on every screen resume via `BaseScreen.on_screen_resume()` → `NavBar.set_active()`, so already-mounted screens keep the correct highlight across switches.
+Each screen yields a shared `NavBar` component (`app/components.py`) from its `compose()` method. The active tab is updated globally in `JobHuntApp.switch_screen()` before the new screen displays. The `NavBar` applies the `active` CSS class to the matching button at mount time (first visit, driven by `app.active_tab`) and re-applies it on every screen resume via `BaseScreen.on_screen_resume()` → `NavBar.set_active()`, so already-mounted screens keep the correct highlight across switches. `set_active()` also moves keyboard focus to the active tab's button; without this Textual auto-focuses the first focusable widget of the new screen (the Dashboard button), which makes the focus highlight appear on the wrong tab.
 
 ## Screen Details
 
@@ -109,7 +109,7 @@ Resume generation, tailoring, and cover-letter workflow.
 | Widget ID | Type | Purpose |
 |---|---|---|
 | `#resume_select` | Select | Pick a base DOCX from `../Resumes/` |
-| `#resume_preview` | ScrollableTextWindow | Profile preview |
+| `#resume_preview` | ScrollableTextWindow | Profile preview (keeps a usable scroll viewport) |
 | `#resume_status` | StatusText | Status messages |
 | `#generate_tailored_btn` | Button | Generate tailored resume |
 | `#generate_cover_letter_btn` | Button | Generate cover letter |
@@ -118,6 +118,12 @@ Resume generation, tailoring, and cover-letter workflow.
 **DOCX parsing:** selects a `.docx` from `../Resumes/` (sibling to project root). Parses
 into a structured `Profile`, JSON-caches at `cache/resume/{filename}.json`, and auto-saves
 to the DB for fit scoring.
+
+**Preview scrolling:** `#resume_preview` is a read-only scrollable window that keeps a
+minimum viewport height (`app.tcss`: `height: 1fr; min-height: 5`), because the resume
+screen stacks more fixed-height chrome above it than other screens. On short terminals
+`#resume_content` scrolls (`overflow-y: auto`) so the action buttons stay reachable
+instead of being clipped.
 
 **Tailored resume:** combines profile + selected job description (via job selection from
 Jobs screen). LLM-first with heuristic keyword-matching fallback. Rebuilds a tailored

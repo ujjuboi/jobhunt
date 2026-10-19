@@ -56,10 +56,11 @@ class BaseScreen(WorkerMixin, Screen):
                 return
 
     def on_screen_resume(self) -> None:
-        """Re-apply the active-tab highlight whenever the screen is shown.
+        """Re-apply the active-tab highlight/focus whenever the screen is shown.
 
         The NavBar mounts once per screen, so re-applying on every resume keeps
-        the highlight correct even for screens that are already mounted. The
+        the highlight correct even for screens that are already mounted, and
+        moves keyboard focus off the first nav button onto the active tab. The
         NavBar may not be mounted yet on the first visit; ``on_mount`` covers
         that case.
         """

@@ -3,7 +3,7 @@ Phase 1 tests: app mount, navigation, tool registry, lazy config.
 """
 import asyncio
 
-from textual.widgets import Input, Static
+from textual.widgets import Button, Input, Static
 
 from jobhunt.app import JobHuntApp
 from jobhunt.app import components as components_module
@@ -266,50 +266,42 @@ def test_active_nav_highlight_follows_screen(monkeypatch):
 
     async def run():
         app = JobHuntApp()
+
+        def assert_active_tab(name: str) -> None:
+            """The active class *and* keyboard focus must be on ``name``'s tab."""
+            assert app.active_tab == name
+            for button in app.screen.query(Button):
+                button_id = button.id or ""
+                assert button.has_class("active") == (button_id == f"{name}_btn")
+            assert app.focused is not None
+            assert app.focused.id == f"{name}_btn"
+
         async with app.run_test(size=(140, 40)) as pilot:
             await asyncio.sleep(0.1)
             # Dashboard is the initial screen
-            assert app.active_tab == "dashboard"
-            dashboard_btn = app.screen.query_one("#dashboard_btn", Button)
-            assert dashboard_btn.has_class("active")
+            assert_active_tab("dashboard")
             non_dashboard_btn = app.screen.query_one("#chat_btn", Button)
             assert not non_dashboard_btn.has_class("active")
 
             # Click chat nav button
             await pilot.click("#chat_btn")
             await asyncio.sleep(0.1)
-            assert app.active_tab == "chat"
-            chat_btn = app.screen.query_one("#chat_btn", Button)
-            assert chat_btn.has_class("active")
-            dashboard_btn = app.screen.query_one("#dashboard_btn", Button)
-            assert not dashboard_btn.has_class("active")
+            assert_active_tab("chat")
 
             # Return to dashboard
             await pilot.click("#dashboard_btn")
             await asyncio.sleep(0.1)
-            assert app.active_tab == "dashboard"
-            dashboard_btn = app.screen.query_one("#dashboard_btn", Button)
-            assert dashboard_btn.has_class("active")
-            chat_btn = app.screen.query_one("#chat_btn", Button)
-            assert not chat_btn.has_class("active")
+            assert_active_tab("dashboard")
 
             # Click search_jobs quick action (which goes to search screen)
             await pilot.click("#search_jobs_btn")
             await asyncio.sleep(0.1)
-            assert app.active_tab == "search"
-            search_btn = app.screen.query_one("#search_btn", Button)
-            assert search_btn.has_class("active")
-            chat_btn = app.screen.query_one("#chat_btn", Button)
-            assert not chat_btn.has_class("active")
+            assert_active_tab("search")
 
             # Revisit an already-mounted screen and verify re-applied highlight
             await pilot.click("#chat_btn")
             await asyncio.sleep(0.1)
-            assert app.active_tab == "chat"
-            chat_btn = app.screen.query_one("#chat_btn", Button)
-            assert chat_btn.has_class("active")
-            search_btn = app.screen.query_one("#search_btn", Button)
-            assert not search_btn.has_class("active")
+            assert_active_tab("chat")
 
     asyncio.run(run())
 

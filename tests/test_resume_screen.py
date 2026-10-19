@@ -1,9 +1,13 @@
 """
 Tests for the resume screen functionality
 """
+import asyncio
+
 import pytest
 from unittest.mock import Mock, patch
-from jobhunt.app.components import StatusText
+
+from jobhunt.app import JobHuntApp
+from jobhunt.app.components import ScrollableTextWindow, StatusText
 from jobhunt.app.screens.resume import ResumeScreen
 from jobhunt.resume.profile_parser import Profile
 
@@ -90,3 +94,35 @@ def test_resume_screen_profile_auto_save_no_db():
             
             # Should not call save_profile when db is None
             mock_manager.save_profile.assert_not_called()
+
+
+def test_resume_preview_keeps_scrollable_viewport():
+    """The resume preview must stay a usable, scrollable viewport on short terminals.
+
+    Regression test for issue #6: the preview is a ``1fr`` TextArea inside a
+    clipping container, so the fixed-height chrome above it (title, label,
+    Select, status, button row) can squeeze the preview to zero rows on a short
+    terminal, leaving scrolling with nowhere to go.
+    """
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(120, 20)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#resume_btn")
+            await asyncio.sleep(0.1)
+
+            preview = app.screen.query_one("#resume_preview", ScrollableTextWindow)
+            preview.text = "\n".join(f"Line {i}: resume content" for i in range(200))
+            await asyncio.sleep(0.1)
+
+            assert preview.max_scroll_y > 0
+            assert preview.size.height >= 3
+
+            preview.focus()
+            await asyncio.sleep(0.1)
+            await pilot.press("pagedown")
+            await asyncio.sleep(0.1)
+            assert preview.scroll_offset.y > 0
+
+    asyncio.run(run())
