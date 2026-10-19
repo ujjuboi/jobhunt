@@ -172,6 +172,7 @@ def complete(messages: List[Dict[str, str]], model: Optional[str] = None, **kwar
         resolved_model, len(messages),
     )
     client = _build_client()
+    started = time.monotonic()
     response = client.chat.completions.create(
         model=resolved_model,
         messages=messages,
@@ -179,8 +180,8 @@ def complete(messages: List[Dict[str, str]], model: Optional[str] = None, **kwar
     )
     reply = response.choices[0].message.content or ""
     logger.info(
-        "LLM complete done: model=%s chars=%d preview=%r",
-        resolved_model, len(reply), reply[:120],
+        "LLM complete done: model=%s chars=%d preview=%r in %.2fs",
+        resolved_model, len(reply), reply[:120], time.monotonic() - started,
     )
     return reply
 
@@ -197,6 +198,7 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
         resolved_model, len(messages),
     )
     attempts = 0
+    started = time.monotonic()
     # Keep track of what's already been yielded to avoid duplication on restart
     seen_content = ""
     yield_count = 0
@@ -226,8 +228,9 @@ def stream(messages: List[Dict[str, str]], model: Optional[str] = None, **kwargs
                             )
                             yield content_to_yield
             logger.info(
-                "LLM stream done: model=%s chunks=%d chars=%d",
+                "LLM stream done: model=%s chunks=%d chars=%d in %.2fs",
                 resolved_model, yield_count, len(seen_content),
+                time.monotonic() - started,
             )
             return
         except Exception as error:

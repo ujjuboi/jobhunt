@@ -7,12 +7,19 @@ reference used by every screen, small widgets built from the shared
 """
 from typing import Optional
 
-from textual.containers import Container
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
 from ...db import JobHuntDB
-from ..components import ActionButton, NavBar, ScreenTitle, StatusText, WorkerMixin
+from ..components import (
+    ActionButton,
+    LogPanel,
+    NavBar,
+    ScreenTitle,
+    StatusText,
+    WorkerMixin,
+)
 
 
 class BaseScreen(WorkerMixin, Screen):
@@ -30,16 +37,22 @@ class BaseScreen(WorkerMixin, Screen):
         super().__init__(name=name)
 
     def compose(self):
-        """Create the screen layout: header, nav bar, content, footer."""
-        yield Header()
+        """Create the screen layout: header, nav bar, content, footer, panel."""
+        with Horizontal(id="screen_root"):
+            with Vertical(id="screen_main"):
+                yield Header()
 
-        yield NavBar()
-        yield Container(
-            self._title(f"JobHunt - {self.screen_name.title()} Screen", id="screen_title"),
-            self._get_content(),
-            id="screen_content"
-        )
-        yield Footer()
+                yield NavBar()
+                yield Container(
+                    self._title(
+                        f"JobHunt - {self.screen_name.title()} Screen",
+                        id="screen_title",
+                    ),
+                    self._get_content(),
+                    id="screen_content"
+                )
+                yield Footer()
+            yield LogPanel()
 
     def on_button_pressed(self, event) -> None:
         """Handle navigation button presses.
@@ -63,11 +76,17 @@ class BaseScreen(WorkerMixin, Screen):
         moves keyboard focus off the first nav button onto the active tab. A
         focused input keeps focus when a screen merely resumes (for example
         after the command palette is dismissed). The NavBar may not be mounted
-        yet on the first visit; ``on_mount`` covers that case.
+        yet on the first visit; ``on_mount`` covers that case. Installed
+        screens are suspended rather than unmounted when tabs switch, so the
+        log panel is also asked to re-sync its reading position with the
+        shared one.
         """
         nav_bar = self.query(NavBar).first()
         if nav_bar is not None:
             nav_bar.set_active(self.screen_name)
+        log_panel = self.query(LogPanel).first()
+        if log_panel is not None:
+            log_panel.restore_shared_view()
 
     def _get_content(self):
         """Override this in subclasses to provide specific content.

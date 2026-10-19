@@ -335,7 +335,7 @@ def test_command_palette_dismissal_keeps_input_focus():
 
 
 def test_get_system_commands_order():
-    """get_system_commands must return [Keys, Theme, Screenshot, Quit]."""
+    """get_system_commands must return [Keys, Toggle Logs, Theme, Screenshot, Quit]."""
 
     async def run():
         app = JobHuntApp()
@@ -343,7 +343,7 @@ def test_get_system_commands_order():
             await asyncio.sleep(0.1)
             commands = list(app.get_system_commands(app.screen))
             names = [cmd.title for cmd in commands]
-            assert names == ["Keys", "Theme", "Screenshot", "Quit"]
+            assert names == ["Keys", "Toggle Logs", "Theme", "Screenshot", "Quit"]
             # No Maximize or Minimize in the list
             assert "Maximize" not in names
             assert "Minimize" not in names
@@ -362,11 +362,12 @@ def test_commands_provider_preserves_order():
             await asyncio.sleep(0.1)
             provider = JobHuntCommandsProvider(app.screen)
             hits = [hit async for hit in provider.discover()]
-            assert len(hits) == 4
+            assert len(hits) == 5
             assert hits[0].text == "Keys"
-            assert hits[1].text == "Theme"
-            assert hits[2].text == "Screenshot"
-            assert hits[3].text == "Quit"
+            assert hits[1].text == "Toggle Logs"
+            assert hits[2].text == "Theme"
+            assert hits[3].text == "Screenshot"
+            assert hits[4].text == "Quit"
 
     asyncio.run(run())
 

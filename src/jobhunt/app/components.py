@@ -9,19 +9,33 @@ that previously lived in each screen:
 * :class:`StatusText`  - one-line status widgets with a typed setter.
 * :class:`ScrollableTextWindow` - read-only, scrollable multi-line output.
 * :class:`ActionButton` - raised action buttons (nav buttons stay plain).
+* :class:`LogPanel` - docked right-side panel tailing the application log.
 * :class:`WorkerMixin`  - lazy agent access plus worker/busy helpers.
 """
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
-from textual.containers import Horizontal
-from textual.widgets import Button, Static, TextArea
+from rich.text import Text
+from textual.app import ScreenStackError
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, RichLog, Static, TextArea
 
 from ..agent import JobHuntAgent
+from ..logging import TUI_LOG_BUFFER_SIZE, get_tui_handler
 
 logger = logging.getLogger(__name__)
+
+#: Rich styles applied to each log level in the panel.
+LEVEL_STYLES: dict[str, str] = {
+    "DEBUG": "dim",
+    "INFO": "green",
+    "WARNING": "yellow",
+    "ERROR": "red",
+    "CRITICAL": "bold red reverse",
+}
 
 NAV_BUTTONS: list[tuple[str, str, str]] = [
     ("dashboard_btn", "dashboard", "Dashboard"),
@@ -112,6 +126,179 @@ class ActionButton(Button):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+
+
+class LogPanel(Vertical):
+    """Docked right-side panel that tails the application log.
+
+    Records are read from the shared
+    :class:`~jobhunt.logging.TUILogHandler` on a short interval. The interval
+    callback runs on the Textual event loop, so records emitted from worker
+    threads are only touched through the handler's lock (no cross-thread UI
+    calls). Each line is colored by level: DEBUG dim, INFO green, WARNING
+    yellow, ERROR red (the message included), CRITICAL bold reversed red.
+
+    The panel is a view over one application-wide stream: every screen replays
+    the full buffered history on mount, so the log is persistent and identical
+    across tabs. The reading position (following the tail, or a scrolled-up
+    offset) is shared through the app: only the panel on the visible screen
+    records it, and it is re-applied whenever a screen becomes visible again.
+
+    Args:
+        *args: Positional arguments forwarded to :class:`Vertical`.
+        **kwargs: Keyword arguments forwarded to :class:`Vertical`.
+    """
+
+    #: Seconds between polls for new records.
+    POLL_SECONDS = 0.5
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, id="log_panel", **kwargs)
+        self._cursor = 0
+        self._restore_pending = True
+        self._log_lines: Optional[RichLog] = None
+
+    def compose(self):
+        """Yield the panel title and the log viewer."""
+        yield Static("Logs", id="log_panel_title")
+        yield RichLog(
+            id="log_lines",
+            max_lines=TUI_LOG_BUFFER_SIZE,
+            min_width=1,
+            wrap=True,
+            highlight=False,
+            markup=False,
+            auto_scroll=False,
+        )
+
+    def on_mount(self) -> None:
+        """Replay buffered history, then poll the handler for new records."""
+        self.display = getattr(self.app, "log_panel_visible", True)
+        self._log_lines = self.query_one("#log_lines", RichLog)
+        self._drain()
+        self.call_after_refresh(self._drain)
+        self.set_interval(self.POLL_SECONDS, self._drain)
+
+    def on_unmount(self) -> None:
+        """Remember the reading position for when the screen is shown again."""
+        log_lines = self._log_lines
+        if log_lines is None:
+            return
+        if not (
+            log_lines.size
+            and log_lines.virtual_size.height
+            and log_lines.container_size.height
+        ):
+            return
+        self._remember_view(log_lines)
+
+    def restore_shared_view(self) -> None:
+        """Re-apply the app-wide reading position after this panel is shown.
+
+        Installed screens are suspended rather than unmounted when tabs
+        switch, so the panel is not rebuilt and its ``on_mount`` restore does
+        not run again. Screens call this from their resume handler to keep the
+        panel in sync with the shared reading position.
+        """
+        self._restore_pending = True
+        self._drain()
+
+    def _drain(self) -> None:
+        """Restore the remembered view, then append newly logged records."""
+        log_lines = self._log_lines
+        if log_lines is None:
+            return
+
+        if self._restore_pending and log_lines.virtual_size.height:
+            self._apply_saved_view(log_lines)
+            self._restore_pending = False
+
+        records, cursor = get_tui_handler().new_records_since(self._cursor)
+        self._cursor = cursor
+
+        if not records:
+            if not self._restore_pending:
+                self._remember_view(log_lines)
+            return
+
+        if self._restore_pending:
+            following = getattr(self.app, "log_follow_tail", True)
+        else:
+            following = log_lines.is_vertical_scroll_end
+
+        for record in records:
+            log_lines.write(self._format_record(record))
+        if following:
+            log_lines.scroll_end(animate=False)
+
+        if not self._restore_pending:
+            self._remember_view(log_lines)
+
+    def _apply_saved_view(self, log_lines: RichLog) -> None:
+        """Scroll the viewer to the position remembered across screens.
+
+        Args:
+            log_lines: The log viewer to position.
+        """
+        if getattr(self.app, "log_follow_tail", True):
+            log_lines.scroll_end(animate=False)
+        else:
+            log_lines.scroll_to(y=getattr(self.app, "log_scroll_y", 0), animate=False)
+
+    def _remember_view(self, log_lines: RichLog) -> None:
+        """Store whether the viewer is following the tail and its offset.
+
+        Only the panel on the currently visible screen records, so a suspended
+        screen cannot overwrite the shared reading position from the panel it
+        keeps mounted.
+
+        Args:
+            log_lines: The log viewer whose position should be recorded.
+        """
+        if not self._is_active():
+            return
+        setattr(self.app, "log_follow_tail", log_lines.is_vertical_scroll_end)
+        setattr(self.app, "log_scroll_y", int(log_lines.scroll_y))
+
+    def _is_active(self) -> bool:
+        """Whether this panel belongs to the screen currently on display.
+
+        Returns:
+            ``True`` when this panel's screen is the app's active screen, and
+            ``False`` while the app is shutting down (the screen stack can be
+            empty while the poll interval is still firing).
+        """
+        try:
+            return self.app.screen is self.screen
+        except ScreenStackError:
+            return False
+
+    @staticmethod
+    def _format_record(record: logging.LogRecord) -> Text:
+        """Render a log record as a level-colored :class:`~rich.text.Text`.
+
+        Args:
+            record: The log record to format.
+
+        Returns:
+            A styled ``Text`` line: ``HH:MM:SS LEVEL logger: message``, with
+            any exception traceback appended after the message.
+        """
+        timestamp = time.strftime("%H:%M:%S", time.localtime(record.created))
+        level_style = LEVEL_STYLES.get(record.levelname, "")
+        message_style = "red" if record.levelno >= logging.ERROR else ""
+        text = Text()
+        text.append(f"{timestamp} ", style="dim")
+        text.append(f"{record.levelname:<8} ", style=level_style)
+        text.append(f"{record.name}: ", style="dim cyan")
+        text.append(record.getMessage(), style=message_style)
+        if record.exc_info:
+            text.append("\n")
+            text.append(
+                logging.Formatter().formatException(record.exc_info),
+                style=message_style,
+            )
+        return text
 
 
 class WorkerMixin:
@@ -334,6 +521,8 @@ __all__ = [
     "StatusText",
     "ScrollableTextWindow",
     "ActionButton",
+    "LogPanel",
+    "LEVEL_STYLES",
     "AgentUnavailableError",
     "WorkerMixin",
     "ButtonRow",
