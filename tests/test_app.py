@@ -306,6 +306,34 @@ def test_active_nav_highlight_follows_screen(monkeypatch):
     asyncio.run(run())
 
 
+def test_command_palette_dismissal_keeps_input_focus():
+    """Dismissing the command palette must not steal focus from a focused input.
+
+    A screen also resumes when a screen pushed above it (the command palette)
+    is dismissed, so the nav bar must not move focus away from an input the
+    user was typing into.
+    """
+
+    async def run():
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_btn")
+            await asyncio.sleep(0.1)
+            chat_input = app.screen.query_one("#chat_input", Input)
+            chat_input.focus()
+            await asyncio.sleep(0.1)
+
+            await pilot.press("ctrl+p")
+            await asyncio.sleep(0.2)
+            await pilot.press("escape")
+            await asyncio.sleep(0.2)
+
+            assert app.focused is chat_input
+
+    asyncio.run(run())
+
+
 def test_get_system_commands_order():
     """get_system_commands must return [Keys, Theme, Screenshot, Quit]."""
 

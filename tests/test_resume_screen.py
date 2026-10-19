@@ -117,7 +117,9 @@ def test_resume_preview_keeps_scrollable_viewport():
             await asyncio.sleep(0.1)
 
             assert preview.max_scroll_y > 0
-            assert preview.size.height >= 3
+            # ``region`` is the allocated box (see the ``min-height: 5`` rule in
+            # app.tcss), which must keep enough rows for the TextArea to scroll.
+            assert preview.region.height >= 5
 
             preview.focus()
             await asyncio.sleep(0.1)
