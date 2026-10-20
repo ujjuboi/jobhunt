@@ -66,13 +66,23 @@ types — results are filtered instantly without a server call.
 
 ### Jobs (`jobs`)
 
-DataTable of saved jobs with row selection and refresh capability.
+Paginated DataTable of saved jobs (20 per page) with a text filter, row
+selection, and refresh capability.
 
 | Widget ID | Type | Purpose |
 |---|---|---|
-| `#jobs_table` | DataTable | Saved jobs table (top 20) |
-| `#jobs_status` | StatusText | Status messages |
-| `#refresh_button` | Button | Reload jobs from DB |
+| `#jobs_filter_input` | Input | Live text filter (title, company, location) |
+| `#jobs_table` | DataTable | Saved jobs for the current page |
+| `#jobs_status` | StatusText | Status messages ("Showing X of Y jobs (page N of M)") |
+| `#prev_page_btn` | Button | Previous page (disabled on first page) |
+| `#next_page_btn` | Button | Next page (disabled on last page) |
+| `#jobs_page_indicator` | StatusText | "Page N of M" indicator |
+| `#refresh_button` | Button | Reload jobs from DB (returns to page 1) |
+
+**Pagination:** pages are fetched with `database.get_jobs(limit=20, offset=page*20,
+search=filter)`; `count_jobs(search=...)` drives the page count. Typing in the
+filter input resets to page 1 and re-queries with a case-insensitive
+`LIKE` match against title, company, and location.
 
 **Job selection:** clicking a row sets `self.app.selected_job_id` and updates the status bar
 with "Selected: <title>". This selection is consumed by the Resume screen for tailored
@@ -84,18 +94,29 @@ resume/cover-letter generation.
 
 ### Fit (`fit`)
 
-Ranked fit-score table. Scores jobs against the user's profile using the scoring pipeline.
+Paginated DataTable of ranked fit scores (20 per page) with a text filter.
+Scores jobs against the user's profile using the scoring pipeline.
 
 | Widget ID | Type | Purpose |
 |---|---|---|
-| `#fit_table` | DataTable | Ranked scored jobs |
+| `#fit_filter_input` | Input | Live text filter (title, company, location) |
 | `#fit_status` | StatusText | Status messages |
-| `#fit_detail` | ScrollableTextWindow | Per-job breakdown |
-| `#analyze_button` | Button | Run fit analysis |
+| `#fit_loading` | LoadingIndicator | Shown while a ranking run is in progress |
+| `#fit_table` | DataTable | Ranked jobs for the current page |
+| `#fit_detail` | Static | Per-job breakdown |
+| `#prev_page_btn` | Button | Previous page (disabled on first page) |
+| `#next_page_btn` | Button | Next page (disabled on last page) |
+| `#fit_page_indicator` | StatusText | "Page N of M" indicator |
+| `#analyze_button` | Button | Score the current page |
 
-**Workflow:** loads all jobs from the DB, runs `ScorePipeline` in the configured mode
-(hybrid/embedding/llm), and renders a ranked table. Selecting a row shows the detailed
-breakdown: score, explanation, matched skills, missing skills, and suggested resume bullets.
+**Workflow:** loads the current page of jobs from the DB (20 per page, filtered by
+`#fit_filter_input`); Analyze runs `ScorePipeline` on the visible page in the configured
+mode (hybrid/embedding/llm). Opening a new page via Prev/Next (or changing the filter)
+auto-ranks that page's unscored jobs — the `#fit_loading` indicator and a "Ranking page
+N" status are shown while scoring runs, and pagination is disabled until it finishes.
+Scores are cached per job id, so revisiting a page never re-ranks known scores.
+Selecting a row shows the detailed breakdown: score, explanation, matched skills,
+missing skills, and suggested resume bullets.
 
 **Profile requirement:** needs a `Profile` saved in the DB (auto-synced when selecting a
 DOCX on the Resume screen). Without a profile, displays "No profile found".

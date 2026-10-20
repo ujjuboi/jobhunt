@@ -85,3 +85,62 @@ def test_resume_save_and_get_round_trip(tmp_path):
     assert retrieved is not None
     assert retrieved.path == "/tmp/r1.docx"
     assert retrieved.generated_at == resume.generated_at
+
+
+def _save_search_jobs(db):
+    """Seed jobs whose title, company, and location are each searchable."""
+    base = datetime(2026, 8, 1, 12, 0, 0)
+    for index, (job_id, title, company, location) in enumerate([
+        ("j1", "Python Engineer", "Acme", "Remote"),
+        ("j2", "Backend Developer", "Initech", "Berlin"),
+        ("j3", "Data Scientist", "Acme Labs", "New York"),
+        ("j4", "Python Trainer", "Globex", "Remote"),
+    ]):
+        job = Job(
+            id=job_id, title=title, company=company, location=location,
+            description="d", url=f"https://example.com/{job_id}",
+            posted_date=base - timedelta(days=index), tags=[], source="test",
+        )
+        db.save_job(job)
+
+
+def test_get_jobs_search_matches_title_company_location(tmp_path):
+    db = JobHuntDB(str(tmp_path / "test.db"))
+    _save_search_jobs(db)
+    # "python" hits two titles, "acme" hits two companies,
+    # "remote" hits two locations (newest first).
+    assert [j.id for j in db.get_jobs(search="python")] == ["j1", "j4"]
+    assert [j.id for j in db.get_jobs(search="acme")] == ["j1", "j3"]
+    assert [j.id for j in db.get_jobs(search="remote")] == ["j1", "j4"]
+
+
+def test_get_jobs_search_is_case_insensitive_and_trimmed(tmp_path):
+    db = JobHuntDB(str(tmp_path / "test.db"))
+    _save_search_jobs(db)
+    assert [j.id for j in db.get_jobs(search="PYTHON")] == ["j1", "j4"]
+    assert [j.id for j in db.get_jobs(search="  acme  ")] == ["j1", "j3"]
+
+
+def test_get_jobs_search_no_match_returns_empty(tmp_path):
+    db = JobHuntDB(str(tmp_path / "test.db"))
+    _save_search_jobs(db)
+    assert db.get_jobs(search="quantum blockchain") == []
+
+
+def test_get_jobs_search_respects_limit_and_offset(tmp_path):
+    db = JobHuntDB(str(tmp_path / "test.db"))
+    _save_search_jobs(db)
+    # Both "python" jobs, fetched one at a time across two pages.
+    page_one = db.get_jobs(limit=1, offset=0, search="python")
+    page_two = db.get_jobs(limit=1, offset=1, search="python")
+    assert [j.id for j in page_one + page_two] == ["j1", "j4"]
+
+
+def test_count_jobs_with_search(tmp_path):
+    db = JobHuntDB(str(tmp_path / "test.db"))
+    _save_search_jobs(db)
+    assert db.count_jobs() == 4
+    assert db.count_jobs(search="python") == 2
+    assert db.count_jobs(search="acme") == 2
+    assert db.count_jobs(search="quantum") == 0
+    assert db.count_jobs(search="") == 4
