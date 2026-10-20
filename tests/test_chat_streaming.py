@@ -10,6 +10,7 @@ from textual.widgets import Button, RichLog
 
 from jobhunt.app import JobHuntApp
 from jobhunt.app import components as components_module
+from jobhunt.app.screens.chat import ChatScreen
 
 
 class FakeStreamAgent:
@@ -329,5 +330,119 @@ def test_chat_stops_repetition_loop(monkeypatch):
                 m["content"] for m in app.screen.messages if m["role"] == "assistant"
             ]
             assert assistant_messages == []
+
+    asyncio.run(run())
+
+
+def test_is_runaway_flags_degenerate_repetition():
+    """A tail that is one short block repeated across two full windows is runaway."""
+    screen = ChatScreen(database=None)
+    assert screen._is_runaway("Assistant: hi\n" * 20)
+
+
+def test_is_runaway_ignores_short_periodic_fragments():
+    """A short but periodic fragment (rule/table separator) is not a runaway."""
+    screen = ChatScreen(database=None)
+    # Well under the 2x window floor, so the periodicity check never runs.
+    assert screen._is_runaway("-" * 60) is False
+    assert screen._is_runaway("|---|---|" * 5) is False
+
+
+def test_is_runaway_ignores_periodic_fragment_inside_normal_reply():
+    """A markdown table separator mid-reply must not trip the guard.
+
+    The last window contains normally-varying table rows, so a long,
+    well-formed answer is not mistaken for a runaway.
+    """
+    screen = ChatScreen(database=None)
+    rows = "".join(f"| item-{index} | value-{index} |\n" for index in range(40))
+    table = "| name | value |\n|---|---|---|\n" + rows
+    assert screen._is_runaway(table) is False
+
+
+def test_is_runaway_flags_length_cap():
+    """A reply past MAX_REPLY_CHARS is abandoned regardless of periodicity."""
+    screen = ChatScreen(database=None)
+    assert screen._is_runaway("x" * (screen.MAX_REPLY_CHARS + 1)) is True
+
+
+def test_chat_stream_error_marker_not_raw_text(monkeypatch):
+    """A mid-stream failure keeps the partial reply, stores the neutral marker,
+    and never exposes the raw error text."""
+
+    class FailingStreamAgent:
+        def __init__(self):
+            self.calls = 0
+
+        def chat_stream(self, messages, model=None):
+            self.calls += 1
+            yield "partial"
+            raise RuntimeError("boom: secret detail")
+
+    async def run():
+        fake = FailingStreamAgent()
+        monkeypatch.setattr(components_module, "JobHuntAgent", lambda database=None: fake)
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_btn")
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_input")
+            await pilot.press("h", "i")
+            await pilot.press("enter")
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "Error:" in app.screen.transcript:
+                    break
+            await asyncio.sleep(0.1)
+
+            assert "Error:" in app.screen.transcript
+            assert "partial" in app.screen.transcript
+            assert "boom" not in app.screen.transcript
+            assistant_messages = [
+                m["content"] for m in app.screen.messages if m["role"] == "assistant"
+            ]
+            assert len(assistant_messages) == 1
+            stored_reply = assistant_messages[0]
+            assert stored_reply.startswith("partial")
+            assert "[error: see logs]" in stored_reply
+            assert "boom" not in stored_reply
+
+    asyncio.run(run())
+
+
+def test_chat_stream_error_before_first_chunk(monkeypatch):
+    """A failure before any chunk still renders an in-line error and stores
+    the bare marker."""
+
+    class ImmediateFailureAgent:
+        def chat_stream(self, messages, model=None):
+            raise RuntimeError("connection refused")
+            yield  # pragma: no cover - makes this a generator function
+
+    async def run():
+        monkeypatch.setattr(
+            components_module, "JobHuntAgent", lambda database=None: ImmediateFailureAgent()
+        )
+        app = JobHuntApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_btn")
+            await asyncio.sleep(0.1)
+            await pilot.click("#chat_input")
+            await pilot.press("h", "i")
+            await pilot.press("enter")
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if "Error:" in app.screen.transcript:
+                    break
+            await asyncio.sleep(0.1)
+
+            assert "Error:" in app.screen.transcript
+            assert "connection refused" not in app.screen.transcript
+            assistant_messages = [
+                m["content"] for m in app.screen.messages if m["role"] == "assistant"
+            ]
+            assert assistant_messages == ["[error: see logs]"]
 
     asyncio.run(run())
