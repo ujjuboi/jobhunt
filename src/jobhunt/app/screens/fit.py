@@ -103,7 +103,11 @@ class FitScreen(BaseScreen):
         """Load the saved jobs into the table (unscored) in the background."""
         if self._is_busy("fit"):
             return
-        self._run_worker(self._async_load_jobs, "fit-load")
+        self._run_worker(
+            self._async_load_jobs,
+            "fit-load",
+            loading_message="Loading saved jobs…",
+        )
 
     async def _async_load_jobs(self) -> None:
         """Run the unscored job load off the event loop."""
@@ -175,7 +179,11 @@ class FitScreen(BaseScreen):
             self._update_status("Cannot analyze: no profile found.")
             return
         self._update_status("Scoring...")
-        self._run_worker(self._async_analyze, "fit")
+        self._run_worker(
+            self._async_analyze,
+            "fit",
+            loading_message="Scoring jobs against your profile…",
+        )
 
     async def _async_analyze(self) -> None:
         """Run the scoring pipeline off the event loop."""

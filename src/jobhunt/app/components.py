@@ -9,6 +9,7 @@ that previously lived in each screen:
 * :class:`StatusText`  - one-line status widgets with a typed setter.
 * :class:`ScrollableTextWindow` - read-only, scrollable multi-line output.
 * :class:`ActionButton` - raised action buttons (nav buttons stay plain).
+* :class:`LoadingBar` - spinner + message shown while a worker runs.
 * :class:`LogPanel` - docked right-side panel tailing the application log.
 * :class:`WorkerMixin`  - lazy agent access plus worker/busy helpers.
 """
@@ -21,7 +22,8 @@ from typing import Optional
 from rich.text import Text
 from textual.app import ScreenStackError
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, RichLog, Static, TextArea
+from textual.widgets import Button, LoadingIndicator, RichLog, Static, TextArea
+from textual.worker import Worker
 
 from ..agent import JobHuntAgent
 from ..logging import TUI_LOG_BUFFER_SIZE, get_tui_handler
@@ -81,6 +83,53 @@ class StatusText(Static):
             text: The new message to display.
         """
         self.update(text)
+
+
+class LoadingBar(Horizontal):
+    """One-line spinner plus message shown while a background worker runs.
+
+    Mounted on every screen by :class:`~jobhunt.app.screens.base.BaseScreen`
+    (id ``#loading_bar``) and toggled by
+    :meth:`WorkerMixin.on_worker_state_changed`. Hidden at rest so screens
+    keep their exact layout; when shown it occupies a single line above the
+    footer.
+
+    Args:
+        *args: Positional arguments forwarded to :class:`Horizontal`.
+        **kwargs: Keyword arguments forwarded to :class:`Horizontal`.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, id="loading_bar", **kwargs)
+        self.display = False
+
+    def compose(self):
+        """Yield the spinner and the message label."""
+        yield LoadingIndicator(id="loading_spinner")
+        yield Static("", id="loading_message")
+
+    def set_message(self, text: str) -> None:
+        """Replace the message shown next to the spinner.
+
+        Args:
+            text: The new message to display.
+        """
+        self.query_one("#loading_message", Static).update(text)
+
+    def show(self, message: str = "") -> None:
+        """Display the bar with an optional message.
+
+        Args:
+            message: The message to show next to the spinner.
+        """
+        if message:
+            self.set_message(message)
+        self.display = True
+
+    def hide(self) -> None:
+        """Hide the bar and clear the message."""
+        self.display = False
+        self.set_message("")
 
 
 class ScrollableTextWindow(TextArea):
@@ -319,6 +368,8 @@ class WorkerMixin:
     def __init__(self, *args, **kwargs) -> None:
         #: Memoized lazy agent instance; created on first ``agent`` access.
         self._agent = None
+        #: Map of worker group to the loading message shown while it runs.
+        self._loading_messages: dict[str, str] = {}
         super().__init__(*args, **kwargs)
 
     # ------------------------------------------------------------------
@@ -393,17 +444,50 @@ class WorkerMixin:
             for worker in self.workers
         )
 
-    def _run_worker(self, coro, group: str):
+    def _run_worker(self, coro, group: str, loading_message: str | None = None):
         """Start an exclusive worker for ``coro`` in the given group.
 
         Args:
             coro: The coroutine to run in the background.
             group: The worker group name (exclusive within that group).
+            loading_message: When given, the shared :class:`LoadingBar`
+                shows this message while the group's worker runs.
 
         Returns:
             The started :class:`~textual.worker.Worker` instance.
         """
+        if loading_message is not None:
+            self._loading_messages[group] = loading_message
+        else:
+            self._loading_messages.pop(group, None)
         return self.run_worker(coro, group=group, exclusive=True)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Show or hide the shared loading bar as tracked workers run.
+
+        The bar's visibility is recomputed from the live worker list rather
+        than refcounted, so cancelled or failed workers cannot leave a stuck
+        spinner behind. Groups started without a ``loading_message`` (for
+        example Chat, whose streamed transcript is its own feedback) are
+        never tracked and never show the bar.
+
+        Args:
+            event: The worker state-change message; ignored directly because
+                any state change (start, success, error, cancel) may affect
+                visibility, so the live worker list is recomputed.
+        """
+        loading_bar = self.query(LoadingBar).first()
+        if loading_bar is None:
+            return
+        running = [
+            worker
+            for worker in self.workers
+            if worker.is_running and worker.group in self._loading_messages
+        ]
+        if running:
+            loading_bar.show(self._loading_messages[running[-1].group])
+        else:
+            loading_bar.hide()
 
     def _list_jobs(self):
         """Blocking job listing helper, run off the event loop.
@@ -521,6 +605,7 @@ __all__ = [
     "StatusText",
     "ScrollableTextWindow",
     "ActionButton",
+    "LoadingBar",
     "LogPanel",
     "LEVEL_STYLES",
     "AgentUnavailableError",

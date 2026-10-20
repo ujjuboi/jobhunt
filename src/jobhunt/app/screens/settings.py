@@ -170,7 +170,11 @@ class SettingsScreen(BaseScreen):
         """Kick off a one-time LinkedIn browser login in the background."""
         self._set_linkedin_status("Launching browser for LinkedIn login...")
         self.query_one("#linkedin_login_btn", Button).disabled = True
-        self._run_worker(self._async_linkedin_login, "linkedin")
+        self._run_worker(
+            self._async_linkedin_login,
+            "linkedin",
+            loading_message="Launching browser for LinkedIn login…",
+        )
 
     async def _async_linkedin_login(self) -> None:
         """Run the blocking LinkedIn login off the event loop.
@@ -247,7 +251,11 @@ class SettingsScreen(BaseScreen):
             self._apply_linkedin_email(cached[1])
             return
         self._set_linkedin_status("Signed in — resolving account email…")
-        self._run_worker(self._async_refresh_linkedin_status, "linkedin-status")
+        self._run_worker(
+            self._async_refresh_linkedin_status,
+            "linkedin-status",
+            loading_message="Resolving LinkedIn account…",
+        )
 
     async def _async_refresh_linkedin_status(self) -> None:
         """Resolve the signed-in email off the event loop."""

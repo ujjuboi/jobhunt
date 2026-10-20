@@ -79,7 +79,11 @@ class JobsScreen(BaseScreen):
 
     def _load_jobs(self) -> None:
         """Load jobs into the table without freezing the UI."""
-        self._run_worker(self._async_load_jobs, "jobs")
+        self._run_worker(
+            self._async_load_jobs,
+            "jobs",
+            loading_message="Loading saved jobs…",
+        )
 
     async def _async_load_jobs(self) -> None:
         """Run the job load off the event loop and re-render the table."""

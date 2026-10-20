@@ -5,6 +5,7 @@ Lets the user pick a DOCX resume, previews its parsed profile (auto-syncing
 it to the database for fit scoring), and generates/saves tailored resumes
 and cover letters for a selected job.
 """
+import asyncio
 import logging
 
 from textual.containers import Container
@@ -165,95 +166,172 @@ class ResumeScreen(BaseScreen):
         return None, None, None
 
     def _generate_tailored_resume(self) -> None:
-        """Generate a tailored resume for the selected job."""
-        if not self._selected_resume:
-            self.query_one("#resume_status", StatusText).set_message("Select a resume first")
-            return
+        """Generate a tailored resume for the selected job in the background.
 
-        # Check if a job is selected
-        if self.app.selected_job_id is None:
-            self.query_one("#resume_status", StatusText).set_message(
-                "Select a job row in the Jobs screen first"
-            )
+        Validation runs inline; the blocking DOCX parse and LLM call run in
+        a worker so the UI stays responsive and the loading bar animates.
+        """
+        if self._validate_generation_request() is None:
             return
-
-        # Resolve job details from the selected job
-        job_entry, job_id, company = self._resolve_selected_job()
-        if job_entry is None:
-            self.query_one("#resume_status", StatusText).set_message("Selected job not found in database")
-            return
-
-        self._selected_job_description = job_entry.description
-        self._selected_company = company
-        self._selected_job_id = job_id
 
         self.query_one("#resume_status", StatusText).set_message("Generating tailored resume...")
+        self._set_generation_buttons_disabled(True)
+        self._run_worker(
+            self._async_generate_tailored_resume,
+            "resume",
+            loading_message="Generating tailored resume…",
+        )
+
+    async def _async_generate_tailored_resume(self) -> None:
+        """Run the blocking tailored-resume generation off the event loop."""
         try:
-            profile = self.resume_manager.load_profile_from_docx(self._selected_resume)
-            tailored = self.resume_manager.generate_tailored_resume(
-                profile, self._selected_job_description, agent=self.agent,
+            profile = await asyncio.to_thread(
+                self.resume_manager.load_profile_from_docx, self._selected_resume
             )
-
-            lines = [f"Summary: {tailored.summary}", "", "Skills:"]
-            for skill in tailored.updated_skills:
-                lines.append(f"  • {skill}")
-            lines.append("")
-            lines.append("Tailored Experience:")
-            for bullet in tailored.tailored_sections.get("experience", []):
-                lines.append(f"  • {bullet}")
-
-            self.query_one("#resume_preview", ScrollableTextWindow).text = "\n".join(lines)
-            self.query_one("#resume_status", StatusText).set_message("✓ Tailored resume generated")
-            self._last_tailored = tailored
-            # Capture the job info when generation succeeds
-            self._last_tailored_job_id = self._selected_job_id
-            self._last_tailored_company = self._selected_company
-            self.query_one("#save_outputs_btn", Button).disabled = False
+            tailored = await asyncio.to_thread(
+                self.resume_manager.generate_tailored_resume,
+                profile,
+                self._selected_job_description,
+                agent=self.agent,
+            )
+            self.call_after_refresh(self._apply_tailored_resume, tailored)
         except Exception as error:
             logger.exception("Tailored resume generation failed")
-            self.query_one("#resume_status", StatusText).set_message(f"Error: {error}")
+            self.call_after_refresh(self._generation_failed, error)
+
+    def _apply_tailored_resume(self, tailored) -> None:
+        """Render the generated tailored resume and enable saving.
+
+        Args:
+            tailored: The generated tailored-resume result.
+        """
+        lines = [f"Summary: {tailored.summary}", "", "Skills:"]
+        for skill in tailored.updated_skills:
+            lines.append(f"  • {skill}")
+        lines.append("")
+        lines.append("Tailored Experience:")
+        for bullet in tailored.tailored_sections.get("experience", []):
+            lines.append(f"  • {bullet}")
+
+        self.query_one("#resume_preview", ScrollableTextWindow).text = "\n".join(lines)
+        self.query_one("#resume_status", StatusText).set_message("✓ Tailored resume generated")
+        self._last_tailored = tailored
+        # Capture the job info when generation succeeds
+        self._last_tailored_job_id = self._selected_job_id
+        self._last_tailored_company = self._selected_company
+        self.query_one("#save_outputs_btn", Button).disabled = False
+        self._set_generation_buttons_disabled(False)
 
     def _generate_cover_letter(self) -> None:
-        """Generate a cover letter for the selected job."""
+        """Generate a cover letter for the selected job in the background.
+
+        Validation runs inline; the blocking DOCX parse and LLM call run in
+        a worker so the UI stays responsive and the loading bar animates.
+        """
+        if self._validate_generation_request() is None:
+            return
+
+        self.query_one("#resume_status", StatusText).set_message("Generating cover letter...")
+        self._set_generation_buttons_disabled(True)
+        self._run_worker(
+            self._async_generate_cover_letter,
+            "resume",
+            loading_message="Generating cover letter…",
+        )
+
+    async def _async_generate_cover_letter(self) -> None:
+        """Run the blocking cover-letter generation off the event loop."""
+        try:
+            profile = await asyncio.to_thread(
+                self.resume_manager.load_profile_from_docx, self._selected_resume
+            )
+            cover_letter = await asyncio.to_thread(
+                self.resume_manager.generate_cover_letter,
+                profile,
+                self._selected_job_description,
+                company_name=self._selected_company,
+                agent=self.agent,
+            )
+            self.call_after_refresh(self._apply_cover_letter, cover_letter)
+        except Exception as error:
+            logger.exception("Cover letter generation failed")
+            self.call_after_refresh(self._generation_failed, error)
+
+    def _apply_cover_letter(self, cover_letter) -> None:
+        """Render the generated cover letter and enable saving.
+
+        Args:
+            cover_letter: The generated cover-letter result.
+        """
+        self.query_one("#resume_preview", ScrollableTextWindow).text = cover_letter.content
+        self.query_one("#resume_status", StatusText).set_message("✓ Cover letter generated")
+        self._last_cover_letter = cover_letter
+        # Capture the job info when generation succeeds
+        self._last_cover_letter_job_id = self._selected_job_id
+        self._last_cover_letter_company = self._selected_company
+        self.query_one("#save_outputs_btn", Button).disabled = False
+        self._set_generation_buttons_disabled(False)
+
+    def _validate_generation_request(self):
+        """Check that a resume and job are selected before generating.
+
+        Returns:
+            The resolved job entry, or ``None`` when generation cannot
+            proceed (the status line explains why).
+        """
+        if self._is_busy("resume"):
+            self.query_one("#resume_status", StatusText).set_message(
+                "Generation already in progress…"
+            )
+            return None
         if not self._selected_resume:
             self.query_one("#resume_status", StatusText).set_message("Select a resume first")
-            return
+            return None
 
         # Check if a job is selected
         if self.app.selected_job_id is None:
             self.query_one("#resume_status", StatusText).set_message(
                 "Select a job row in the Jobs screen first"
             )
-            return
+            return None
 
         # Resolve job details from the selected job
         job_entry, job_id, company = self._resolve_selected_job()
         if job_entry is None:
             self.query_one("#resume_status", StatusText).set_message("Selected job not found in database")
-            return
+            return None
 
         self._selected_job_description = job_entry.description
         self._selected_company = company
         self._selected_job_id = job_id
+        return job_entry
 
-        self.query_one("#resume_status", StatusText).set_message("Generating cover letter...")
-        try:
-            profile = self.resume_manager.load_profile_from_docx(self._selected_resume)
-            cover_letter = self.resume_manager.generate_cover_letter(
-                profile, self._selected_job_description,
-                company_name=self._selected_company, agent=self.agent,
-            )
+    def _set_generation_buttons_disabled(self, disabled: bool) -> None:
+        """Disable the generation buttons and resume selector while a worker runs.
 
-            self.query_one("#resume_preview", ScrollableTextWindow).text = cover_letter.content
-            self.query_one("#resume_status", StatusText).set_message("✓ Cover letter generated")
-            self._last_cover_letter = cover_letter
-            # Capture the job info when generation succeeds
-            self._last_cover_letter_job_id = self._selected_job_id
-            self._last_cover_letter_company = self._selected_company
-            self.query_one("#save_outputs_btn", Button).disabled = False
-        except Exception as error:
-            logger.exception("Cover letter generation failed")
-            self.query_one("#resume_status", StatusText).set_message(f"Error: {error}")
+        The resume selector is included because changing it re-enables the
+        generate buttons via :meth:`_update_resume_preview`, which would let
+        the user re-trigger generation mid-run.
+
+        Args:
+            disabled: True to disable the controls, False to re-enable them.
+        """
+        self.query_one("#generate_tailored_btn", Button).disabled = disabled
+        self.query_one("#generate_cover_letter_btn", Button).disabled = disabled
+        self.query_one("#resume_select", Select).disabled = disabled
+
+    def _generation_failed(self, error: Exception) -> None:
+        """Surface a generation failure in the status line and re-enable buttons.
+
+        The traceback is logged by the worker's ``except`` block (the
+        callback runs outside any exception context, so ``logger.exception``
+        here would log ``NoneType: None`` instead of the real traceback).
+
+        Args:
+            error: The exception raised during generation.
+        """
+        self.query_one("#resume_status", StatusText).set_message(f"Error: {error}")
+        self._set_generation_buttons_disabled(False)
 
     def _save_outputs(self) -> None:
         """Save the latest generated resume/cover letter to disk."""
