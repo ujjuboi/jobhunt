@@ -28,6 +28,9 @@ class ChatScreen(BaseScreen):
 
     THINKING_TEXT = "[dim]Thinking...[/]\n"
     MAX_REPLY_CHARS = 20000
+    #: The tail inspected for periodicity. The reply must already be longer
+    #: than ``LOOP_WINDOW * 2`` before the check runs, so a short but legitimately
+    #: periodic fragment (a rule of ``-``, a table separator) cannot trip it.
     LOOP_WINDOW = 80
     LOOP_MAX_PERIOD = 20
 
@@ -129,6 +132,11 @@ class ChatScreen(BaseScreen):
         or the tail of the reply is a single repeating block of at most
         ``LOOP_MAX_PERIOD`` chars repeated across ``LOOP_WINDOW`` chars.
 
+        The periodicity check only runs once the reply already exceeds twice
+        ``LOOP_WINDOW``, so a short but legitimately periodic fragment (a
+        horizontal rule, a markdown table separator) is never mistaken for a
+        runaway.
+
         Args:
             text: The accumulated reply text to inspect.
 
@@ -137,6 +145,8 @@ class ChatScreen(BaseScreen):
         """
         if len(text) > self.MAX_REPLY_CHARS:
             return True
+        if len(text) <= self.LOOP_WINDOW * 2:
+            return False
         window = text[-self.LOOP_WINDOW:]
         for period in range(1, self.LOOP_MAX_PERIOD + 1):
             if len(window) < period * 4:
@@ -190,6 +200,12 @@ class ChatScreen(BaseScreen):
         are properly styled rather than displayed verbatim. User and agent
         message text is escaped before it is embedded in the transcript, so
         bracket characters in message content render literally.
+
+        The full rewrite is required rather than an incremental append:
+        :meth:`RichLog.write` starts a new rendered line on every call, so
+        writing streamed chunks separately would split one reply across many
+        lines. The reply size is bounded by :attr:`MAX_REPLY_CHARS`, which caps
+        the worst-case re-render cost.
         """
         chat_log = self.query_one("#chat_messages", RichLog)
         chat_log.clear()
@@ -234,13 +250,23 @@ class ChatScreen(BaseScreen):
         self._render_transcript()
 
     async def _ask_agent(self) -> None:
-        """Request a reply for the current conversation history."""
+        """Request a reply for the current conversation history.
+
+        An unavailable agent (``_require_agent`` raising
+        :class:`~jobhunt.app.components.AgentUnavailableError` when oMLX is
+        unavailable/offline) is handled in-line by the ``except Exception``
+        branch below: the cause is logged, shown as a status line in the
+        transcript, and recorded in the history as the neutral
+        ``[error: see logs]`` marker.
+
+        Raises:
+            asyncio.CancelledError: Always re-raised after the stop marker is
+                written, so a Stop/Esc cancellation still reaches the worker.
+        """
         try:
-            agent = self.agent
-            if agent is None:
-                raise RuntimeError("oMLX unavailable — could not create chat agent")
+            agent = self._require_agent()
             if hasattr(agent, "chat_stream"):
-                await self._ask_agent_streaming()
+                await self._ask_agent_streaming(agent)
             else:
                 reply = await asyncio.to_thread(agent.chat, list(self.messages))
                 if self._is_runaway(reply):
@@ -265,24 +291,35 @@ class ChatScreen(BaseScreen):
         finally:
             self._set_stop_available(False)
 
-    async def _ask_agent_streaming(self) -> None:
-        """Stream the agent reply, updating the transcript as chunks arrive."""
+    async def _ask_agent_streaming(self, agent) -> None:
+        """Stream the agent reply, updating the transcript as chunks arrive.
+
+        On a mid-stream failure the partial reply stays visible in the
+        transcript and is stored with the ``[error: see logs]`` marker, so the
+        next turn keeps what was already produced without exposing the raw
+        error text.
+
+        Args:
+            agent: The resolved agent exposing ``chat_stream``. Passed in rather
+                than re-read from the ``agent`` property so a concurrent
+                reassignment cannot leave the producer thread with ``None``.
+        """
         queue: "asyncio.Queue[str | tuple[str, str] | None]" = asyncio.Queue()
         start = self._start_streaming_line()
         reply_parts: List[str] = []
-        error: str | None = None
+        stream_failed: bool = False
         stopped: bool = False
 
         def _produce() -> None:
-            nonlocal error
+            nonlocal stream_failed
             try:
-                for piece in self.agent.chat_stream(list(self.messages)):
+                for piece in agent.chat_stream(list(self.messages)):
                     if self._generation_stop is not None and self._generation_stop.is_set():
                         break
                     queue.put_nowait(piece)
-            except Exception as error:
-                error = str(error)
-                logger.warning("Agent streaming failed: %s", error, exc_info=True)
+            except Exception as streaming_error:
+                stream_failed = True
+                logger.warning("Agent streaming failed: %s", streaming_error, exc_info=True)
                 queue.put_nowait(("error", "[error: see logs]"))
             finally:
                 queue.put_nowait(None)
@@ -295,8 +332,11 @@ class ChatScreen(BaseScreen):
                 break
             if isinstance(piece, tuple):
                 if piece[0] == "error":
+                    partial_reply = "".join(reply_parts)
                     self._streaming_line(
-                        start, f"[red]Error:[/] {escape(piece[1])}"
+                        start,
+                        (f"{escape(partial_reply)}\n" if partial_reply else "")
+                        + f"[red]Error:[/] {escape(piece[1])}",
                     )
                 continue
             reply_parts.append(piece)
@@ -314,8 +354,14 @@ class ChatScreen(BaseScreen):
 
         if stopped:
             return
-        if error:
-            self.messages.append({"role": "assistant", "content": error})
+        if stream_failed:
+            partial_reply = "".join(reply_parts)
+            stored_reply = (
+                f"{partial_reply}\n[error: see logs]"
+                if partial_reply
+                else "[error: see logs]"
+            )
+            self.messages.append({"role": "assistant", "content": stored_reply})
             self._append_transcript("\n")
         else:
             self.messages.append({"role": "assistant", "content": "".join(reply_parts)})
