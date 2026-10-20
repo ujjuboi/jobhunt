@@ -10,12 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from textual.widgets import Button, LoadingIndicator, Static
-from textual.worker import Worker
+from textual.widgets import Button, LoadingIndicator, Select, Static
 
 from jobhunt.app import JobHuntApp
 from jobhunt.app.components import LoadingBar, StatusText
-from jobhunt.app.screens.dashboard import DashboardScreen
 from jobhunt.app.screens.resume import ResumeScreen
 
 
@@ -139,17 +137,6 @@ def test_bar_hides_after_worker_cancel():
     asyncio.run(run())
 
 
-def test_worker_state_changed_message_type_matches_handler():
-    """WorkerMixin must handle Textual's Worker.StateChanged message name."""
-    app = JobHuntApp()
-    screen = DashboardScreen(database=None)
-    # The handler is found via Textual's message dispatch naming; assert the
-    # attribute exists and is callable for the StateChanged class.
-    handler = getattr(screen, "on_worker_state_changed")
-    assert callable(handler)
-    assert Worker.StateChanged.__name__ == "StateChanged"
-
-
 def test_resume_generation_runs_in_worker():
     """Generation must not block the event loop: it starts a worker, disables
     the generate buttons, and reports through the status line and bar."""
@@ -190,14 +177,21 @@ def test_resume_generation_runs_in_worker():
             screen._generate_tailored_resume()
             await asyncio.sleep(0.1)
 
-            # Worker started: buttons disabled, status set, bar visible.
+            # Worker started: controls disabled, status set, bar visible.
             assert screen._is_busy("resume")
             assert screen.query_one("#generate_tailored_btn", Button).disabled
             assert screen.query_one("#generate_cover_letter_btn", Button).disabled
+            assert screen.query_one("#resume_select", Select).disabled
             status = str(screen.query_one("#resume_status", StatusText).content)
             assert "Generating tailored resume" in status
             bar = screen.query_one("#loading_bar", LoadingBar)
             assert bar.display
+
+            # A second trigger while busy must be rejected with feedback.
+            screen._generate_cover_letter()
+            assert not screen.resume_manager.generate_cover_letter.called
+            status = str(screen.query_one("#resume_status", StatusText).content)
+            assert "Generation already in progress" in status
 
             # Let the worker finish and settle.
             gate.set()
@@ -207,6 +201,7 @@ def test_resume_generation_runs_in_worker():
                     break
 
             assert not screen.query_one("#generate_tailored_btn", Button).disabled
+            assert not screen.query_one("#resume_select", Select).disabled
             status = str(screen.query_one("#resume_status", StatusText).content)
             assert "✓ Tailored resume generated" in status
             assert not bar.display
@@ -214,8 +209,9 @@ def test_resume_generation_runs_in_worker():
     asyncio.run(run())
 
 
-def test_resume_generation_failure_reenables_buttons():
-    """A failed generation surfaces the error and re-enables the buttons."""
+def test_resume_generation_failure_reenables_buttons(caplog):
+    """A failed generation surfaces the error, re-enables the controls, and
+    logs the real traceback from inside the worker's except block."""
 
     async def run():
         app = JobHuntApp()
@@ -249,6 +245,11 @@ def test_resume_generation_failure_reenables_buttons():
             assert "Error: LLM offline" in status
             assert not screen.query_one("#generate_tailored_btn", Button).disabled
             assert not screen.query_one("#generate_cover_letter_btn", Button).disabled
+            assert not screen.query_one("#resume_select", Select).disabled
+
+            # The traceback must come from the worker's except block.
+            assert "Cover letter generation failed" in caplog.text
+            assert "RuntimeError: LLM offline" in caplog.text
 
     asyncio.run(run())
 

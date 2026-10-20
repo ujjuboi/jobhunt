@@ -196,6 +196,7 @@ class ResumeScreen(BaseScreen):
             )
             self.call_after_refresh(self._apply_tailored_resume, tailored)
         except Exception as error:
+            logger.exception("Tailored resume generation failed")
             self.call_after_refresh(self._generation_failed, error)
 
     def _apply_tailored_resume(self, tailored) -> None:
@@ -253,6 +254,7 @@ class ResumeScreen(BaseScreen):
             )
             self.call_after_refresh(self._apply_cover_letter, cover_letter)
         except Exception as error:
+            logger.exception("Cover letter generation failed")
             self.call_after_refresh(self._generation_failed, error)
 
     def _apply_cover_letter(self, cover_letter) -> None:
@@ -278,6 +280,9 @@ class ResumeScreen(BaseScreen):
             proceed (the status line explains why).
         """
         if self._is_busy("resume"):
+            self.query_one("#resume_status", StatusText).set_message(
+                "Generation already in progress…"
+            )
             return None
         if not self._selected_resume:
             self.query_one("#resume_status", StatusText).set_message("Select a resume first")
@@ -302,21 +307,29 @@ class ResumeScreen(BaseScreen):
         return job_entry
 
     def _set_generation_buttons_disabled(self, disabled: bool) -> None:
-        """Enable or disable both generation buttons while a worker runs.
+        """Disable the generation buttons and resume selector while a worker runs.
+
+        The resume selector is included because changing it re-enables the
+        generate buttons via :meth:`_update_resume_preview`, which would let
+        the user re-trigger generation mid-run.
 
         Args:
-            disabled: True to disable the buttons, False to re-enable them.
+            disabled: True to disable the controls, False to re-enable them.
         """
         self.query_one("#generate_tailored_btn", Button).disabled = disabled
         self.query_one("#generate_cover_letter_btn", Button).disabled = disabled
+        self.query_one("#resume_select", Select).disabled = disabled
 
     def _generation_failed(self, error: Exception) -> None:
         """Surface a generation failure in the status line and re-enable buttons.
 
+        The traceback is logged by the worker's ``except`` block (the
+        callback runs outside any exception context, so ``logger.exception``
+        here would log ``NoneType: None`` instead of the real traceback).
+
         Args:
             error: The exception raised during generation.
         """
-        logger.exception("Resume generation failed")
         self.query_one("#resume_status", StatusText).set_message(f"Error: {error}")
         self._set_generation_buttons_disabled(False)
 

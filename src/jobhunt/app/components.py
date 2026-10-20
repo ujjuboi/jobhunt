@@ -472,8 +472,9 @@ class WorkerMixin:
         never tracked and never show the bar.
 
         Args:
-            event: The worker state-change message; only its worker's group
-                is inspected (any state change may affect visibility).
+            event: The worker state-change message; ignored directly because
+                any state change (start, success, error, cancel) may affect
+                visibility, so the live worker list is recomputed.
         """
         loading_bar = self.query(LoadingBar).first()
         if loading_bar is None:
