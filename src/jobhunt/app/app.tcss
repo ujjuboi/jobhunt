@@ -35,6 +35,26 @@
     height: 1fr;
 }
 
+/* Loading bar: one line above the footer, hidden at rest (LoadingBar sets
+   display=False in __init__). The spinner keeps a fixed cell so the message
+   never shifts horizontally as the frames animate. */
+#loading_bar {
+    height: auto;
+    padding: 0 1;
+    background: $panel;
+}
+
+#loading_spinner {
+    width: 3;
+    height: 1;
+}
+
+#loading_message {
+    width: 1fr;
+    color: $text-muted;
+    content-align: left middle;
+}
+
 /* The resume screen stacks more fixed-height chrome (title, label, Select,
    status, button row) than other screens, so its flexible preview can be
    squeezed to zero rows on short terminals. Keep a usable scroll viewport. */

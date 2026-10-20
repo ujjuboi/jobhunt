@@ -65,7 +65,11 @@ class SearchScreen(BaseScreen):
         self._set_status("Searching configured sources…")
         self.all_jobs = []
         self._disable_button(True)
-        self._run_worker(self._async_browse, "search")
+        self._run_worker(
+            self._async_browse,
+            "search",
+            loading_message="Searching configured sources…",
+        )
 
     # ── events ────────────────────────────────────────────────────────────
 
@@ -80,7 +84,11 @@ class SearchScreen(BaseScreen):
         if event.button.id == "search_button":
             self._disable_button(True)
             self._set_status("Refreshing…")
-            self._run_worker(self._async_browse, "search")
+            self._run_worker(
+                self._async_browse,
+                "search",
+                loading_message="Refreshing from configured sources…",
+            )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Filter the results as the user types.
