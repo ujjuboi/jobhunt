@@ -17,10 +17,48 @@ from textual.widgets import Button, Input, RichLog
 
 from ...config import get_user_config
 from ...db import JobHuntDB
+from ...models import Job
 from ..components import ActionButton, ButtonRow
 from .base import BaseScreen
 
 logger = logging.getLogger(__name__)
+
+#: Maximum number of characters of a job description sent to the model.
+MAX_JOB_CONTEXT_CHARS = 4000
+
+
+def build_job_context(job_entry: Job) -> str:
+    """Describe a job for the model.
+
+    Args:
+        job_entry: The job to describe.
+
+    Returns:
+        A block of text with the job's metadata and (truncated)
+        description, ready to be used as chat context.
+    """
+    description = job_entry.description or ""
+    truncated = len(description) > MAX_JOB_CONTEXT_CHARS
+    if truncated:
+        description = description[:MAX_JOB_CONTEXT_CHARS] + "\n… (description truncated)"
+    posted = (
+        job_entry.posted_date.strftime("%Y-%m-%d")
+        if job_entry.posted_date
+        else "N/A"
+    )
+    lines = [
+        "The user is asking about this job posting:",
+        f"Title: {job_entry.title}",
+        f"Company: {job_entry.company}",
+        f"Location: {job_entry.location or 'N/A'}",
+        f"Posted: {posted}",
+        f"Job ID: {job_entry.id}",
+        f"URL: {job_entry.url or 'N/A'}",
+        "",
+        "Description:",
+        description,
+    ]
+    return "\n".join(lines)
 
 
 class ChatScreen(BaseScreen):
@@ -28,6 +66,8 @@ class ChatScreen(BaseScreen):
 
     THINKING_TEXT = "[dim]Thinking...[/]\n"
     MAX_REPLY_CHARS = 20000
+    #: The question pre-filled in the input when a job is loaded as context.
+    JOB_CONTEXT_PROMPT = "What should I know about this job?"
     #: The tail inspected for periodicity. The reply must already be longer
     #: than ``LOOP_WINDOW * 2`` before the check runs, so a short but legitimately
     #: periodic fragment (a rule of ``-``, a table separator) cannot trip it.
@@ -43,6 +83,7 @@ class ChatScreen(BaseScreen):
         ]
         self.transcript = ""
         self._generation_stop: threading.Event | None = None
+        self._pending_job_context: Job | None = None
 
     def _get_content(self):
         """Compose the chat body.
@@ -64,6 +105,10 @@ class ChatScreen(BaseScreen):
             id="chat_content"
         )
 
+    def on_mount(self) -> None:
+        """Show a job context that was loaded before the screen was opened."""
+        self._render_job_context()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Send the submitted input text.
 
@@ -71,6 +116,36 @@ class ChatScreen(BaseScreen):
             event: The input-submitted event.
         """
         self._send(event.value)
+
+    def set_job_context(self, job_entry: Job) -> None:
+        """Pre-load a job's details as context for the next chat turn.
+
+        The job is added to the conversation as a system message (so the
+        model treats it as background, not as something the user said) and
+        echoed in the transcript so the user can see what the agent knows.
+        The input is pre-filled with a starter question the user can edit
+        or send as-is.
+
+        The screen does not have to be open yet: when it is not mounted the
+        transcript and the input are updated as soon as it is.
+
+        Args:
+            job_entry: The job to describe to the agent.
+        """
+        self.messages.append({"role": "system", "content": build_job_context(job_entry)})
+        self._pending_job_context = job_entry
+        if self.is_mounted:
+            self._render_job_context()
+
+    def _render_job_context(self) -> None:
+        """Show the pending job context in the transcript and the input."""
+        job_entry = self._pending_job_context
+        if job_entry is None:
+            return
+        self._pending_job_context = None
+        summary = f"{job_entry.title} at {job_entry.company}"
+        self._append_transcript(f"[bold cyan]Job context:[/] {escape(summary)}\n")
+        self.query_one("#chat_input", Input).value = self.JOB_CONTEXT_PROMPT
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle the Send and Stop buttons.

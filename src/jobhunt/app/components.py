@@ -9,6 +9,8 @@ that previously lived in each screen:
 * :class:`StatusText`  - one-line status widgets with a typed setter.
 * :class:`ScrollableTextWindow` - read-only, scrollable multi-line output.
 * :class:`ActionButton` - raised action buttons (nav buttons stay plain).
+* :class:`RowClickTable` - data table that reports single row clicks.
+* :class:`ContextMenu` - floating menu of actions shown over a screen.
 * :class:`LoadingBar` - spinner + message shown while a worker runs.
 * :class:`LogPanel` - docked right-side panel tailing the application log.
 * :class:`WorkerMixin`  - lazy agent access plus worker/busy helpers.
@@ -22,7 +24,16 @@ from typing import Optional
 from rich.text import Text
 from textual.app import ScreenStackError
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, LoadingIndicator, RichLog, Static, TextArea
+from textual.events import Click
+from textual.message import Message
+from textual.widgets import (
+    Button,
+    DataTable,
+    LoadingIndicator,
+    RichLog,
+    Static,
+    TextArea,
+)
 from textual.worker import Worker
 
 from ..agent import JobHuntAgent
@@ -160,6 +171,220 @@ class AgentUnavailableError(RuntimeError):
     error (instead of a bare ``AttributeError`` or a silent empty list) so
     callers can tell an empty database apart from unavailable processing.
     """
+
+
+class RowClickTable(DataTable):
+    """A :class:`~textual.widgets.DataTable` that reports row clicks.
+
+    Textual's ``DataTable`` defaults to ``cursor_type="cell"``, so a single
+    click only moves the cursor: ``RowSelected`` is posted for Enter (or for
+    a *second* click on the already highlighted cell), never for the first
+    click on a row. Screens that need a click to act on a row use this
+    subclass, which posts a :class:`RowClickTable.RowClicked` message for
+    every click on a data row.
+
+    The message is posted from the public ``on_click`` handler on purpose:
+    Textual walks the MRO and prefers the private ``_on_click`` only within
+    the same class, so this handler runs first and ``DataTable._on_click``
+    still moves the cursor afterwards. Both details are Textual 8.2
+    behaviours, so they are called out here for future maintainers.
+
+    Args:
+        *args: Positional arguments forwarded to :class:`DataTable`.
+        **kwargs: Keyword arguments forwarded to :class:`DataTable`.
+    """
+
+    class RowClicked(Message):
+        """Posted when one of the table's data rows is clicked.
+
+        Args:
+            table: The table that was clicked.
+            row_key: The key of the clicked row.
+            row_index: The index of the clicked row.
+            screen_x: The horizontal screen coordinate of the click.
+            screen_y: The vertical screen coordinate of the click.
+        """
+
+        def __init__(
+            self,
+            table: "RowClickTable",
+            row_key,
+            row_index: int,
+            screen_x: int,
+            screen_y: int,
+        ) -> None:
+            super().__init__()
+            self.table = table
+            """The table that was clicked."""
+            self.row_key = row_key
+            """The key of the clicked row."""
+            self.row_index = row_index
+            """The index of the clicked row."""
+            self.screen_x = screen_x
+            """The horizontal screen coordinate of the click."""
+            self.screen_y = screen_y
+            """The vertical screen coordinate of the click."""
+
+        @property
+        def control(self) -> "RowClickTable":
+            """The table that sent the message."""
+            return self.table
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    async def on_click(self, event: Click) -> None:
+        """Post a :class:`RowClickTable.RowClicked` message for a clicked row.
+
+        Args:
+            event: The click event; clicks that miss the data rows (the
+                header, or the empty space below the last row) are ignored.
+        """
+        style = event.style
+        if style is None:
+            return
+        meta = style.meta
+        if "row" not in meta or "column" not in meta:
+            return
+        row_index = meta["row"]
+        rows = self.ordered_rows
+        if not (0 <= row_index < len(rows)):
+            return
+        self.post_message(
+            self.RowClicked(
+                self,
+                rows[row_index].key,
+                row_index,
+                int(event.screen_x or 0),
+                int(event.screen_y or 0),
+            )
+        )
+
+
+class ContextMenu(Vertical):
+    """A floating menu of actions shown over the current screen.
+
+    The menu is an absolutely positioned overlay: it does not take part in
+    the layout of its parent and is painted on top of it, so it can be
+    anchored to the spot the user clicked without pushing the page around.
+    ``open_at`` takes *screen* coordinates and converts them to the offset
+    the parent expects.
+
+    Args:
+        *args: Positional arguments forwarded to :class:`Vertical`.
+        **kwargs: Keyword arguments forwarded to :class:`Vertical`.
+    """
+
+    DEFAULT_CSS = """
+    ContextMenu {
+        position: absolute;
+        overlay: screen;
+        display: none;
+        width: 34;
+        height: auto;
+        background: $panel;
+        border: round $primary;
+        padding: 0 1;
+    }
+    ContextMenu > .context-menu--title {
+        color: $text-muted;
+        text-style: bold;
+    }
+    ContextMenu > Button {
+        width: 1fr;
+        margin: 0;
+    }
+    """
+
+    BINDINGS = [("escape", "dismiss", "Dismiss menu")]
+
+    class Dismissed(Message):
+        """Posted when the menu is dismissed without picking an action."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.display = False
+        self._offset: tuple[int, int] = (0, 0)
+
+    def open_at(self, x: int, y: int, title: str = "") -> None:
+        """Show the menu anchored at a screen position.
+
+        Args:
+            x: The horizontal screen coordinate to anchor the menu at.
+            y: The vertical screen coordinate to anchor the menu at.
+            title: Optional heading shown above the menu items.
+        """
+        if title:
+            title_widget = self.query(".context-menu--title").first()
+            if title_widget is not None:
+                title_widget.update(title)
+        self.display = True
+        self._offset = self._offset_for(x, y)
+        self.styles.offset = self._offset
+        self.call_after_refresh(self._keep_inside_screen)
+        first_button = self.query(Button).first()
+        if first_button is not None:
+            first_button.focus()
+
+    def close(self) -> None:
+        """Hide the menu without posting a message."""
+        self.display = False
+
+    def contains_point(self, x: int, y: int) -> bool:
+        """Whether a screen position lies inside the menu.
+
+        Screens use this to tell a click on a menu item apart from a click
+        somewhere else on the page (which dismisses the menu).
+
+        Args:
+            x: The horizontal screen coordinate.
+            y: The vertical screen coordinate.
+
+        Returns:
+            ``True`` when the position is inside the menu's region.
+        """
+        region = self.region
+        return (
+            region.x <= x < region.x + region.width
+            and region.y <= y < region.y + region.height
+        )
+
+    def action_dismiss(self) -> None:
+        """Close the menu and report the dismissal."""
+        self.close()
+        self.post_message(self.Dismissed())
+
+    def _offset_for(self, x: int, y: int) -> tuple[int, int]:
+        """Convert screen coordinates into an offset for the parent.
+
+        Args:
+            x: The horizontal screen coordinate.
+            y: The vertical screen coordinate.
+
+        Returns:
+            The ``(x, y)`` offset to apply to the menu, relative to the
+            content origin of its parent container.
+        """
+        parent = self.parent
+        if parent is None:
+            return (x, y)
+        origin = parent.content_region
+        return (x - origin.x, y - origin.y)
+
+    def _keep_inside_screen(self) -> None:
+        """Shift the menu up/left when it would overflow the screen."""
+        region = self.region
+        if not (region.width and region.height):
+            return
+        x, y = self._offset
+        screen_width, screen_height = self.screen.size
+        if region.y + region.height > screen_height:
+            y -= region.y + region.height - screen_height
+        if region.x + region.width > screen_width:
+            x -= region.x + region.width - screen_width
+        if (x, y) != self._offset:
+            self._offset = (x, y)
+            self.styles.offset = self._offset
 
 
 class ActionButton(Button):
@@ -592,6 +817,8 @@ __all__ = [
     "StatusText",
     "ScrollableTextWindow",
     "ActionButton",
+    "RowClickTable",
+    "ContextMenu",
     "LoadingBar",
     "LogPanel",
     "LEVEL_STYLES",
