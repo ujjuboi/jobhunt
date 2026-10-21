@@ -113,7 +113,11 @@ class JobsScreen(BaseScreen):
 
     def _load_jobs(self) -> None:
         """Load the current page of jobs into the table without freezing the UI."""
-        self._run_worker(self._async_load_jobs, "jobs")
+        self._run_worker(
+            self._async_load_jobs,
+            "jobs",
+            loading_message="Loading saved jobs…",
+        )
 
     def _fetch_page(self) -> Tuple[List, int]:
         """Fetch one page of jobs plus the matching total count.

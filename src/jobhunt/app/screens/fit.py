@@ -149,7 +149,11 @@ class FitScreen(BaseScreen):
         """Load the current page of jobs (unscored) in the background."""
         if self._is_busy("fit"):
             return
-        self._run_worker(self._async_load_jobs, "fit-load")
+        self._run_worker(
+            self._async_load_jobs,
+            "fit-load",
+            loading_message="Loading saved jobs…",
+        )
 
     def _fetch_page(self) -> Tuple[List, int]:
         """Fetch one page of jobs plus the matching total count.
@@ -285,7 +289,11 @@ class FitScreen(BaseScreen):
             return
         self._set_loading(True)
         self._update_status(f"Ranking page {self._page + 1} — this may take a moment...")
-        self._run_worker(self._async_analyze, "fit")
+        self._run_worker(
+            self._async_analyze,
+            "fit",
+            loading_message="Scoring jobs against your profile…",
+        )
 
     async def _async_analyze(self) -> None:
         """Run the scoring pipeline off the event loop."""

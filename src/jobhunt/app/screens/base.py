@@ -14,6 +14,7 @@ from textual.widgets import Footer, Header, Static
 from ...db import JobHuntDB
 from ..components import (
     ActionButton,
+    LoadingBar,
     LogPanel,
     NavBar,
     ScreenTitle,
@@ -51,6 +52,7 @@ class BaseScreen(WorkerMixin, Screen):
                     self._get_content(),
                     id="screen_content"
                 )
+                yield LoadingBar()
                 yield Footer()
             yield LogPanel()
 
