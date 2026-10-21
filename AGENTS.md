@@ -4,8 +4,9 @@ Local AI job-search harness: a Textual TUI over an OpenAI-compatible local serve
 
 ## Commands
 
-- Tests: `uv run pytest` (baseline ~91 passed, 1 skipped). Integration tests are opt-in and must not require network/config in CI -- guard them with the `integration` pytest marker (requires `JOBHUNT_INTEGRATION=1` to run).
+- Tests: `uv run pytest` (baseline ~176 passed, 1 skipped). Integration tests are opt-in and must not require network/config in CI -- guard them with the `integration` pytest marker (requires `JOBHUNT_INTEGRATION=1` to run).
 - `uv run jobhunt` launches the TUI; `uv run jobhunt-smoke` exercises the live oMLX server.
+- `uv run python scripts/pr_review.py --pr-number N --dry-run` renders a pull request review without posting it (see `docs/PR_REVIEW.md`).
 - No linter/formatter is configured (no ruff/flake8/black/mypy). Verify with the test suite and `python -m compileall`.
 
 ## TUI screens

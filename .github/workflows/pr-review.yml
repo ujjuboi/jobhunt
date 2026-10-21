@@ -1,0 +1,73 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
+      model:
+        description: "Model to review with, as provider/model-id"
+        required: false
+        default: "opencode/big-pickle"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  REVIEW_MODEL: ${{ github.event.inputs.model || 'opencode/big-pickle' }}
+
+jobs:
+  review:
+    name: Review pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenCode
+        run: curl -fsSL https://opencode.ai/v2/install | bash
+
+      - name: Review the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/pr_review.py \
+            --pr-number "$PR_NUMBER" \
+            --model "$REVIEW_MODEL" \
+            --directory "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/review-output.md"
+
+      - name: Publish the review summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f "$RUNNER_TEMP/review-output.md" ]; then
+            {
+              echo "## OpenCode review output"
+              echo
+              cat "$RUNNER_TEMP/review-output.md"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
