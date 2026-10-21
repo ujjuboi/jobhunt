@@ -17,6 +17,23 @@ from ..models import Application, Job, Profile, Resume
 logger = logging.getLogger(__name__)
 
 
+def _fold_case(value: Optional[str]) -> str:
+    """Lowercase text for search matching, including non-ASCII characters.
+
+    SQLite's built-in ``LOWER()`` is ASCII-only, so it cannot fold accented
+    uppercase characters (``MÜNCHEN`` would not match ``münchen``). This
+    function is registered on each connection as the ``fold_case`` SQL
+    function so case folding matches Python's semantics.
+
+    Args:
+        value: The text to lowercase, or ``None``.
+
+    Returns:
+        The lowercased text, or an empty string for ``None``/empty input.
+    """
+    return value.lower() if value else ""
+
+
 class JobHuntDB:
     """SQLite database handler for JobHunt.
 
@@ -183,13 +200,28 @@ class JobHuntDB:
             logger.warning("Error getting job: %s", error)
             return None
 
+    def _connect(self) -> sqlite3.Connection:
+        """Open a database connection with the JobHunt SQL helpers registered.
+
+        Registers the ``fold_case`` function (Python-lowercasing, unlike the
+        ASCII-only SQLite ``LOWER()``) used by the search-aware queries.
+
+        Returns:
+            A connection with the helper functions attached.
+        """
+        connection = sqlite3.connect(self.database_path)
+        connection.create_function("fold_case", 1, _fold_case)
+        return connection
+
     @staticmethod
     def _job_search_clause(search: Optional[str]) -> tuple[str, tuple]:
         """Build the WHERE clause and parameters for a text job search.
 
         Args:
             search: Case-insensitive text matched against title, company,
-                and location; empty/blank text matches every job.
+                and location; empty/blank text matches every job. The text
+                is matched literally: ``%`` and ``_`` are not treated as
+                ``LIKE`` wildcards.
 
         Returns:
             A ``(where_clause, params)`` pair; ``where_clause`` is an empty
@@ -197,11 +229,18 @@ class JobHuntDB:
         """
         if not search or not search.strip():
             return "", ()
-        pattern = f"%{search.strip().lower()}%"
+        escaped = (
+            search.strip().lower()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped}%"
+        escape = "ESCAPE '\\'"
         clause = (
-            "WHERE LOWER(COALESCE(title, '')) LIKE ? "
-            "OR LOWER(COALESCE(company, '')) LIKE ? "
-            "OR LOWER(COALESCE(location, '')) LIKE ?"
+            f"WHERE fold_case(COALESCE(title, '')) LIKE ? {escape} "
+            f"OR fold_case(COALESCE(company, '')) LIKE ? {escape} "
+            f"OR fold_case(COALESCE(location, '')) LIKE ? {escape}"
         )
         return clause, (pattern, pattern, pattern)
 
@@ -219,7 +258,7 @@ class JobHuntDB:
         """
         try:
             where_clause, params = self._job_search_clause(search)
-            with sqlite3.connect(self.database_path) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 cursor.execute(f'''
                     SELECT * FROM jobs
@@ -565,7 +604,7 @@ class JobHuntDB:
         """
         try:
             where_clause, params = self._job_search_clause(search)
-            with sqlite3.connect(self.database_path) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 cursor.execute(f'SELECT COUNT(*) FROM jobs {where_clause}', params)
                 result = cursor.fetchone()

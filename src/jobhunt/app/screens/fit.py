@@ -181,8 +181,12 @@ class FitScreen(BaseScreen):
         """Render the current page of jobs so the page is never an empty void.
 
         Already-known fit scores are shown from the cache; unknown ones show
-        an em dash. When the page was opened via pagination/filtering and a
-        profile exists, the unscored jobs are ranked automatically.
+        an em dash. Within the page, scored jobs sort above unscored ones by
+        score descending (unscored keep posting order); the rank column is
+        the job's position in the full posting-ordered result set, so rank
+        numbers are not sequential top-to-bottom. When the page was opened
+        via pagination/filtering and a profile exists, the unscored jobs are
+        ranked automatically.
 
         Args:
             jobs: The unscored jobs on the current page.
@@ -210,10 +214,13 @@ class FitScreen(BaseScreen):
             return
 
         self._add_columns(data_table)
-        for offset_index, job_entry in enumerate(jobs):
+        posting_positions = {
+            job_entry.id: index for index, job_entry in enumerate(jobs)
+        }
+        for job_entry in self._jobs_in_display_order(jobs):
             fit_score = self._fit_scores.get(job_entry.id)
             data_table.add_row(
-                str(self._page * PAGE_SIZE + offset_index + 1),
+                str(self._page * PAGE_SIZE + posting_positions[job_entry.id] + 1),
                 job_entry.title[:30] + "..." if len(job_entry.title) > 30 else job_entry.title,
                 job_entry.company[:20] + "..." if len(job_entry.company) > 20 else job_entry.company,
                 job_entry.location or "N/A",
@@ -240,6 +247,22 @@ class FitScreen(BaseScreen):
             if unscored and self.database and self.database.get_profile():
                 self._analyze()
 
+    def _jobs_in_display_order(self, jobs: List) -> List:
+        """Order a page's jobs for display: scored first, best score first.
+
+        Args:
+            jobs: The current page's jobs, in posting order.
+
+        Returns:
+            The same jobs with cached-scored ones first, sorted by score
+            descending (stable, so ties keep posting order), followed by the
+            unscored ones in posting order.
+        """
+        scored = [job_entry for job_entry in jobs if job_entry.id in self._fit_scores]
+        unscored = [job_entry for job_entry in jobs if job_entry.id not in self._fit_scores]
+        scored.sort(key=lambda job_entry: self._fit_scores[job_entry.id].score, reverse=True)
+        return scored + unscored
+
     @staticmethod
     def _add_columns(data_table: DataTable) -> None:
         """Add the standard fit-scores columns to a table.
@@ -260,8 +283,7 @@ class FitScreen(BaseScreen):
         if not self.database or not self.database.get_profile():
             self._update_status("Cannot analyze: no profile found.")
             return
-        self.query_one("#fit_loading", LoadingIndicator).display = True
-        self._update_pagination_widgets_disabled(True)
+        self._set_loading(True)
         self._update_status(f"Ranking page {self._page + 1} — this may take a moment...")
         self._run_worker(self._async_analyze, "fit")
 
@@ -326,12 +348,16 @@ class FitScreen(BaseScreen):
         self._update_status(message)
 
     def _set_loading(self, loading: bool) -> None:
-        """Toggle the ranking loading indicator.
+        """Toggle the ranking loading state and the controls it locks.
+
+        The filter input is locked too, so the text in the box cannot
+        diverge from the filter a ranking run is scoring against.
 
         Args:
             loading: Whether a ranking run is in progress.
         """
         self.query_one("#fit_loading", LoadingIndicator).display = loading
+        self.query_one("#fit_filter_input", Input).disabled = loading
         self._update_pagination_widgets_disabled(loading)
 
     def _update_pagination_widgets_disabled(self, disabled: bool) -> None:

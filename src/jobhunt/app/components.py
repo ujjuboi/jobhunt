@@ -309,8 +309,7 @@ class WorkerMixin:
     * a lazily-constructed :class:`JobHuntAgent` (``agent`` property),
     * a busy check over a worker group (``_is_busy``),
     * a single entry point for starting exclusive workers
-      (``_run_worker``),
-    * the blocking ``list_jobs`` helper (``_list_jobs``).
+      (``_run_worker``).
 
     Screens provide the ``database`` attribute (via :class:`BaseScreen`);
     this mixin only assumes ``self.database`` exists.
@@ -404,18 +403,6 @@ class WorkerMixin:
             The started :class:`~textual.worker.Worker` instance.
         """
         return self.run_worker(coro, group=group, exclusive=True)
-
-    def _list_jobs(self):
-        """Blocking job listing helper, run off the event loop.
-
-        Returns:
-            The list of jobs from the database.
-
-        Raises:
-            AgentUnavailableError: When no agent could be created, so callers
-                can distinguish an empty database from unavailable processing.
-        """
-        return self._require_agent().run_tool("list_jobs")
 
 
 class ButtonRow(Horizontal):

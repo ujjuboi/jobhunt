@@ -151,7 +151,7 @@ def test_jobs_screen_filter_narrows_results_and_resets_page(tmp_path):
 
 
 class _FakeScorePipeline:
-    """Stand-in for ScorePipeline recording which job ids it scored."""
+    """Stand-in for ScorePipeline: later-listed jobs score higher."""
 
     batches = []
 
@@ -162,9 +162,21 @@ class _FakeScorePipeline:
         job_ids = [job_entry.id for job_entry in jobs]
         _FakeScorePipeline.batches.append(job_ids)
         return [
-            FitScore(job_id=job_id, score=0.5, explanation="looks fine")
-            for job_id in job_ids
+            FitScore(job_id=job_id, score=float(index + 1), explanation="looks fine")
+            for index, job_id in enumerate(job_ids)
         ]
+
+
+def _row_keys(data_table):
+    """Return a DataTable's row keys in display order.
+
+    Args:
+        data_table: The table widget to read.
+
+    Returns:
+        The string row keys top-to-bottom as displayed.
+    """
+    return [row.key.value for row in data_table.ordered_rows]
 
 
 def test_fit_screen_ranks_each_page_once_and_reuses_cache(tmp_path, monkeypatch):
@@ -188,6 +200,9 @@ def test_fit_screen_ranks_each_page_once_and_reuses_cache(tmp_path, monkeypatch)
                 lambda: "jobs available" in str(screen.query_one("#fit_status").content)
             )
             assert screen.query_one("#fit_table").row_count == 20
+            # Before scoring, rows keep posting order with posting-position ranks.
+            assert _row_keys(screen.query_one("#fit_table"))[0] == "job-000"
+            assert screen.query_one("#fit_table").get_row_at(0)[0] == "1"
 
             await pilot.click("#analyze_button")
             assert await _wait_until(
@@ -195,8 +210,17 @@ def test_fit_screen_ranks_each_page_once_and_reuses_cache(tmp_path, monkeypatch)
             )
             assert _FakeScorePipeline.batches == [["job-%03d" % i for i in range(20)]]
             assert screen.query_one("#fit_loading").display is False
+            # The filter input is locked only while scoring runs.
+            assert screen.query_one("#fit_filter_input").disabled is False
             # Row selection still surfaces the cached breakdown.
             assert len(screen._fit_scores) == 20
+            # Scored rows sort by score descending (later ids scored higher),
+            # while the rank column keeps the posting position.
+            fit_table = screen.query_one("#fit_table")
+            assert _row_keys(fit_table) == [
+                "job-%03d" % index for index in range(19, -1, -1)
+            ]
+            assert fit_table.get_row_at(0)[0] == "20"
 
             await pilot.click("#next_page_btn")
             # Paging auto-ranks the new page (10 remaining jobs).
@@ -205,6 +229,7 @@ def test_fit_screen_ranks_each_page_once_and_reuses_cache(tmp_path, monkeypatch)
             )
             assert _FakeScorePipeline.batches[1] == ["job-%03d" % i for i in range(20, 30)]
             assert screen.query_one("#fit_table").row_count == 10
+            assert _row_keys(screen.query_one("#fit_table"))[0] == "job-029"
 
             # Going back to page 1 must not re-rank known scores.
             await pilot.click("#prev_page_btn")
@@ -214,8 +239,70 @@ def test_fit_screen_ranks_each_page_once_and_reuses_cache(tmp_path, monkeypatch)
             await asyncio.sleep(0.3)
             assert len(_FakeScorePipeline.batches) == 2
             assert screen.query_one("#fit_table").row_count == 20
+            # Cached scores keep the page in score order on revisit.
+            assert _row_keys(screen.query_one("#fit_table"))[0] == "job-019"
 
     asyncio.run(run())
+
+
+def test_fit_screen_loading_locks_filter_input(tmp_path):
+    """Toggling the ranking loading state locks/unlocks input and paging."""
+
+    async def run():
+        app = JobHuntApp()
+        database = JobHuntDB(str(tmp_path / "fit.db"))
+        _seed_jobs(database, 5)
+        app.database = database
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#fit_btn")
+            screen = app.screen
+            assert isinstance(screen, FitScreen)
+            assert await _wait_until(
+                lambda: "jobs available" in str(screen.query_one("#fit_status").content)
+            )
+            filter_input = screen.query_one("#fit_filter_input")
+            prev_button = screen.query_one("#prev_page_btn")
+            next_button = screen.query_one("#next_page_btn")
+
+            screen._set_loading(True)
+            assert filter_input.disabled is True
+            assert prev_button.disabled is True
+            assert next_button.disabled is True
+
+            screen._set_loading(False)
+            assert filter_input.disabled is False
+            assert prev_button.disabled is False
+            assert next_button.disabled is False
+
+    asyncio.run(run())
+
+
+def test_jobs_in_display_order_puts_scored_first_by_score():
+    """Scored jobs lead, sorted by score desc; unscored keep posting order."""
+    base = datetime(2026, 8, 1, 12, 0, 0)
+    jobs = [
+        Job(
+            id=f"j{index}",
+            title=f"Engineer {index}",
+            company="Acme",
+            location="Remote",
+            description="Do the thing",
+            url=f"https://example.com/jobs/{index}",
+            posted_date=base - timedelta(minutes=index),
+            tags=[],
+            source="test",
+        )
+        for index in range(4)
+    ]
+    screen = FitScreen(database=None)
+    screen._fit_scores = {
+        "j0": FitScore(job_id="j0", score=0.2, explanation="fine"),
+        "j1": FitScore(job_id="j1", score=0.9, explanation="fine"),
+        "j2": FitScore(job_id="j2", score=0.9, explanation="fine"),
+    }
+    ordered = [job_entry.id for job_entry in screen._jobs_in_display_order(jobs)]
+    # j1/j2 tie at 0.9 and keep posting order; unscored j3 trails.
+    assert ordered == ["j1", "j2", "j0", "j3"]
 
 
 def test_fit_screen_filter_narrows_results(tmp_path):
