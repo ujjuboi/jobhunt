@@ -17,6 +17,23 @@ from ..models import Application, Job, Profile, Resume
 logger = logging.getLogger(__name__)
 
 
+def _fold_case(value: Optional[str]) -> str:
+    """Lowercase text for search matching, including non-ASCII characters.
+
+    SQLite's built-in ``LOWER()`` is ASCII-only, so it cannot fold accented
+    uppercase characters (``MÜNCHEN`` would not match ``münchen``). This
+    function is registered on each connection as the ``fold_case`` SQL
+    function so case folding matches Python's semantics.
+
+    Args:
+        value: The text to lowercase, or ``None``.
+
+    Returns:
+        The lowercased text, or an empty string for ``None``/empty input.
+    """
+    return value.lower() if value else ""
+
+
 class JobHuntDB:
     """SQLite database handler for JobHunt.
 
@@ -183,24 +200,72 @@ class JobHuntDB:
             logger.warning("Error getting job: %s", error)
             return None
 
-    def get_jobs(self, limit: int = 50, offset: int = 0) -> List[Job]:
+    def _connect(self) -> sqlite3.Connection:
+        """Open a database connection with the JobHunt SQL helpers registered.
+
+        Registers the ``fold_case`` function (Python-lowercasing, unlike the
+        ASCII-only SQLite ``LOWER()``) used by the search-aware queries.
+
+        Returns:
+            A connection with the helper functions attached.
+        """
+        connection = sqlite3.connect(self.database_path)
+        connection.create_function("fold_case", 1, _fold_case)
+        return connection
+
+    @staticmethod
+    def _job_search_clause(search: Optional[str]) -> tuple[str, tuple]:
+        """Build the WHERE clause and parameters for a text job search.
+
+        Args:
+            search: Case-insensitive text matched against title, company,
+                and location; empty/blank text matches every job. The text
+                is matched literally: ``%`` and ``_`` are not treated as
+                ``LIKE`` wildcards.
+
+        Returns:
+            A ``(where_clause, params)`` pair; ``where_clause`` is an empty
+            string when no filtering is requested.
+        """
+        if not search or not search.strip():
+            return "", ()
+        escaped = (
+            search.strip().lower()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped}%"
+        escape = "ESCAPE '\\'"
+        clause = (
+            f"WHERE fold_case(COALESCE(title, '')) LIKE ? {escape} "
+            f"OR fold_case(COALESCE(company, '')) LIKE ? {escape} "
+            f"OR fold_case(COALESCE(location, '')) LIKE ? {escape}"
+        )
+        return clause, (pattern, pattern, pattern)
+
+    def get_jobs(self, limit: int = 50, offset: int = 0, search: Optional[str] = None) -> List[Job]:
         """Get a list of jobs, most recently posted first.
 
         Args:
             limit: Maximum number of jobs to return.
             offset: Number of jobs to skip for pagination.
+            search: Optional text filter matched (case-insensitively) against
+                the job title, company, and location.
 
         Returns:
             A list of job objects.
         """
         try:
-            with sqlite3.connect(self.database_path) as connection:
+            where_clause, params = self._job_search_clause(search)
+            with self._connect() as connection:
                 cursor = connection.cursor()
-                cursor.execute('''
-                    SELECT * FROM jobs 
-                    ORDER BY posted_date DESC, created_at DESC 
+                cursor.execute(f'''
+                    SELECT * FROM jobs
+                    {where_clause}
+                    ORDER BY posted_date DESC, created_at DESC
                     LIMIT ? OFFSET ?
-                ''', (limit, offset))
+                ''', (*params, limit, offset))
                 records = cursor.fetchall()
                 jobs = []
                 for record in records:
@@ -527,16 +592,21 @@ class JobHuntDB:
             logger.warning("Error getting resume: %s", error)
             return None
 
-    def count_jobs(self) -> int:
-        """Count total jobs in the database.
+    def count_jobs(self, search: Optional[str] = None) -> int:
+        """Count jobs in the database.
+
+        Args:
+            search: Optional text filter matched (case-insensitively) against
+                the job title, company, and location.
 
         Returns:
-            The number of stored jobs (0 on failure).
+            The number of stored jobs matching the filter (0 on failure).
         """
         try:
-            with sqlite3.connect(self.database_path) as connection:
+            where_clause, params = self._job_search_clause(search)
+            with self._connect() as connection:
                 cursor = connection.cursor()
-                cursor.execute('SELECT COUNT(*) FROM jobs')
+                cursor.execute(f'SELECT COUNT(*) FROM jobs {where_clause}', params)
                 result = cursor.fetchone()
                 return result[0] if result else 0
         except Exception as error:
