@@ -11,14 +11,14 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 from textual.containers import Container
-from textual.widgets import DataTable, Input, LoadingIndicator, Static
+from textual.widgets import Input, LoadingIndicator
 
 from ...config import get_scoring_mode
 from ...db import JobHuntDB
 from ...embeddings import EmbeddingClient
 from ...models import FitScore
 from ...scoring import ScorePipeline
-from ..components import ActionButton, ButtonRow, StatusText
+from ..components import ActionButton, ButtonRow, RowClickTable, ScrollableTextWindow, StatusText
 from .base import BaseScreen
 
 PAGE_SIZE = 20
@@ -49,8 +49,8 @@ class FitScreen(BaseScreen):
             Input(placeholder="Filter by title, company, or location", id="fit_filter_input"),
             self._status("", id="fit_status"),
             LoadingIndicator(id="fit_loading"),
-            DataTable(id="fit_table"),
-            Static("Select a job to see the fit breakdown.", id="fit_detail"),
+            RowClickTable(id="fit_table"),
+            ScrollableTextWindow("Select a job to see the fit breakdown.", id="fit_detail"),
             ButtonRow(
                 ActionButton("Prev", id="prev_page_btn"),
                 ActionButton("Next", id="next_page_btn"),
@@ -67,6 +67,7 @@ class FitScreen(BaseScreen):
 
     def on_screen_resume(self) -> None:
         """Reload the job list whenever the user returns to this screen."""
+        super().on_screen_resume()
         if self.is_mounted:
             self._refresh_jobs()
 
@@ -109,14 +110,31 @@ class FitScreen(BaseScreen):
         self._rank_on_render = True
         self._refresh_jobs()
 
-    def on_data_table_row_selected(self, event) -> None:
-        """Show the fit breakdown for the selected job.
+    def on_row_click_table_row_clicked(self, event) -> None:
+        """Show the fit breakdown for the clicked job.
 
         Args:
-            event: The row-selected event, whose ``row_key`` names the job
+            event: The row-clicked event, whose ``row_key`` names the job
                 whose fit score should be displayed.
         """
-        fit_score = self._fit_scores.get(event.row_key.value)
+        self._show_fit_detail(event.row_key.value)
+
+    def on_data_table_cell_selected(self, event) -> None:
+        """Show the fit breakdown for a job selected with the keyboard.
+
+        Args:
+            event: The cell-selected event, whose cell key names the job
+                whose fit score should be displayed.
+        """
+        self._show_fit_detail(event.cell_key.row_key.value)
+
+    def _show_fit_detail(self, job_id: str) -> None:
+        """Render the fit breakdown of one job into the detail pane.
+
+        Args:
+            job_id: The id of the job to describe.
+        """
+        fit_score = self._fit_scores.get(job_id)
         if not fit_score:
             return
         detail = (
@@ -127,7 +145,8 @@ class FitScreen(BaseScreen):
             f"Suggested resume bullets:\n"
             + ("\n".join(f"- {bullet}" for bullet in fit_score.suggested_bullets) if fit_score.suggested_bullets else "- (none)")
         )
-        self.query_one("#fit_detail", Static).update(detail)
+        self.query_one("#fit_detail", ScrollableTextWindow).text = detail
+        self.app.selected_job_id = job_id
 
     def _update_status(self, message: Optional[str] = None) -> None:
         """Refresh the fit status line.
@@ -203,7 +222,7 @@ class FitScreen(BaseScreen):
         total_pages = max(1, math.ceil(total / PAGE_SIZE))
         self._page = min(self._page, total_pages - 1)
 
-        data_table = self.query_one("#fit_table", DataTable)
+        data_table = self.query_one("#fit_table", RowClickTable)
         data_table.clear(columns=True)
 
         if not jobs:
@@ -268,7 +287,7 @@ class FitScreen(BaseScreen):
         return scored + unscored
 
     @staticmethod
-    def _add_columns(data_table: DataTable) -> None:
+    def _add_columns(data_table: RowClickTable) -> None:
         """Add the standard fit-scores columns to a table.
 
         Args:

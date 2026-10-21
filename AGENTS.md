@@ -4,7 +4,7 @@ Local AI job-search harness: a Textual TUI over an OpenAI-compatible local serve
 
 ## Commands
 
-- Tests: `uv run pytest` (baseline ~176 passed, 1 skipped). Integration tests are opt-in and must not require network/config in CI -- guard them with the `integration` pytest marker (requires `JOBHUNT_INTEGRATION=1` to run).
+- Tests: `uv run pytest` (baseline ~185 passed, 1 skipped). Integration tests are opt-in and must not require network/config in CI -- guard them with the `integration` pytest marker (requires `JOBHUNT_INTEGRATION=1` to run).
 - `uv run jobhunt` launches the TUI; `uv run jobhunt-smoke` exercises the live oMLX server.
 - `uv run python scripts/pr_review.py --pr-number N --dry-run` renders a pull request review without posting it (see `docs/PR_REVIEW.md`).
 - No linter/formatter is configured (no ruff/flake8/black/mypy). Verify with the test suite and `python -m compileall`.
@@ -13,7 +13,8 @@ Local AI job-search harness: a Textual TUI over an OpenAI-compatible local serve
 
 - `JobHuntApp` (`app/__init__.py`) installs the seven screens with `install_screen(ScreenName(database=self.database), name=...)` and pushes `"dashboard"` in `on_mount`. The app owns `self.database` and passes the same instance to every screen.
 - Every screen subclasses `BaseScreen` (`app/screens/base.py`), which inherits `WorkerMixin` from `app/components.py`. Write a screen's body in `_get_content()`, NOT `compose()`.
-- Use the shared components from `app/components.py` instead of hand-rolling: `ScreenTitle`, `StatusText` (one-line status, set via `set_message`), `ScrollableTextWindow` (read-only scrollable `TextArea`), `ActionButton` (action buttons only; nav buttons stay plain `Button`), `WorkerMixin`.
+- Use the shared components from `app/components.py` instead of hand-rolling: `ScreenTitle`, `StatusText` (one-line status, set via `set_message`), `ScrollableTextWindow` (read-only scrollable `TextArea`), `ActionButton` (action buttons only; nav buttons stay plain `Button`), `RowClickTable` (a `DataTable` that posts `RowClicked` for single row clicks), `ContextMenu` (a floating menu of actions anchored at a screen position), `WorkerMixin`.
+- Textual's `DataTable` defaults to `cursor_type="cell"`, so a single click never posts `RowSelected`. Use `RowClickTable` (and its `RowClicked` message) when a click on a row must act; handle `DataTable.CellSelected` (keyboard selection) as well.
 - Use `self._title(text, id=...)` and `self._status(text, id=...)` helpers from `BaseScreen`.
 - CRITICAL: preserve widget IDs. Tests address widgets by ID (e.g. `#chat_messages`, `#fit_status`, `#status`, `#fit_table`, `#analyze_button`, `#jobs_status`, `#search_results`, `#sources_input`, `#linkedin_block`, `#settings_status`, `#nav_bar`, `#*_btn`). Never rename IDs during a refactor.
 - Background work: never block the event loop. Dispatch blocking I/O via `self._run_worker(asyncio.to_thread(coro), group)` (started exclusively per `group`) and update the UI with `self.call_after_refresh(...)`. Guard re-entry with `self._is_busy(group)`.

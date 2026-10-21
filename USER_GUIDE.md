@@ -139,8 +139,18 @@ Notes:
 
 Lists the jobs saved locally from Search. **Refresh** reloads the list.
 
-**Select a job row** to target it — this is what the Fit and Resume screens use
-as the current job.
+**Click a job row** to open a small menu next to the pointer with three actions:
+
+- **View Details** — shows the job's card (title, company, id, posting date,
+  location, salary, source, link, and the full description) in a scrollable pane
+  below the table.
+- **Chat About This Job** — jumps to the Chat screen with the job's details
+  loaded as context and a starter question in the input box.
+- **Apply** — opens the job's application page in your default browser.
+
+Press **Escape** or click elsewhere to close the menu without picking an action.
+Selecting a row this way also targets the job — this is what the Fit and Resume
+screens use as the current job.
 
 ### Fit
 
@@ -150,7 +160,7 @@ Ranks saved jobs against your resume and shows an explainable score for each:
    for scoring).
 2. Press **Analyze**. JobHunt scores the saved jobs using your configured scoring
    mode.
-3. Select a row to see the breakdown: overall score, explanation, matched skills,
+3. Click a row to see the breakdown: overall score, explanation, matched skills,
    missing skills, and suggested resume bullets.
 
 Scores are cached per job, so re-analyzing is fast.
@@ -159,7 +169,7 @@ Scores are cached per job, so re-analyzing is fast.
 
 1. Select a base resume from the dropdown — the structured profile preview loads
    and your profile is synced for Fit scoring.
-2. **Select a job** on the Jobs screen (you'll be prompted if none is selected).
+2. **Click a job row** on the Jobs screen (you'll be prompted if none is selected).
 3. Choose an action:
    - **Generate Tailored Resume** — the LLM rewrites the resume for the job's
      posting (ATS-friendly, keyword-focused).
@@ -174,6 +184,10 @@ A streaming chat with the JobHunt agent. The agent can answer questions about
 your job hunt and, like the screens, can **search jobs**, **score fit**,
 **generate a tailored resume**, and **write a cover letter**. Replies stream in;
 transient oMLX hiccups are retried automatically.
+
+When you arrive here from the Jobs screen ("Chat About This Job"), the job's
+details are already loaded as context and the input box holds the starter
+question "What should I know about this job?" — edit it or send it as is.
 
 ### Settings
 
