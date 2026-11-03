@@ -61,14 +61,22 @@ class DiffFile:
     """The lines a single file contributes to a pull request diff.
 
     Attributes:
-        path: Repository-relative path of the file.
+        path: Repository-relative path of the file (new side for modifications).
         changed_lines: New-side line numbers the diff adds or modifies.
         hunk_lines: New-side line numbers inside a hunk, context lines included.
+        added_lines: Text of added lines keyed by their new-side line number.
+        removed_lines: Text of removed lines keyed by their old-side line number.
+        old_path: Left-side path for renames and deletions.
+        deleted: True when the file no longer exists in the head tree.
     """
 
     path: str
     changed_lines: set[int] = field(default_factory=set)
     hunk_lines: set[int] = field(default_factory=set)
+    added_lines: dict[int, str] = field(default_factory=dict)
+    removed_lines: dict[int, str] = field(default_factory=dict)
+    old_path: str | None = None
+    deleted: bool = False
 
 
 @dataclass
@@ -95,26 +103,33 @@ class PlacedFinding:
         path: Path the comment will be attached to, or None when unplaceable.
         line: Line the comment will be attached to, or None when unplaceable.
         status: Why the finding was placed the way it was.
+        side: ``RIGHT`` for new-file lines, ``LEFT`` for deleted ones.
     """
 
     finding: Finding
     path: str | None
     line: int | None
     status: str
+    side: str = "RIGHT"
 
 
-def parse_unified_diff(patch: str) -> dict[str, DiffFile]:
+def parse_unified_diff(patch: str, include_deletions: bool = False) -> dict[str, DiffFile]:
     """Map every file in a unified diff to the lines it adds or modifies.
 
     Args:
         patch: The unified diff text.
+        include_deletions: When True, files deleted by the patch are keyed under
+            their old path with ``deleted`` set to True; by default they are
+            skipped, matching the original behaviour.
 
     Returns:
         A mapping of repository-relative path to its diff lines.
     """
     files: dict[str, DiffFile] = {}
     current: DiffFile | None = None
+    old_path: str | None = None
     new_line = 0
+    old_line = 0
     in_hunk = False
 
     for raw in patch.splitlines():
@@ -125,7 +140,11 @@ def parse_unified_diff(patch: str) -> dict[str, DiffFile]:
         if raw.startswith("+++ "):
             target = raw[4:].strip()
             if target == "/dev/null":
-                current = None
+                # Pure deletion: the file only exists on the left side.
+                if include_deletions and old_path is not None:
+                    current = files.setdefault(old_path, DiffFile(path=old_path, old_path=old_path, deleted=True))
+                else:
+                    current = None
                 in_hunk = False
                 continue
             path = target[2:] if target.startswith("b/") else target
@@ -133,9 +152,13 @@ def parse_unified_diff(patch: str) -> dict[str, DiffFile]:
             in_hunk = False
             continue
         if raw.startswith("--- "):
+            source = raw[4:].strip()
+            if source != "/dev/null":
+                old_path = source[2:] if source.startswith("a/") else source
             continue
         hunk = HUNK_HEADER.match(raw)
         if hunk is not None:
+            old_line = int(hunk.group(1))
             new_line = int(hunk.group(3))
             in_hunk = current is not None
             continue
@@ -144,11 +167,14 @@ def parse_unified_diff(patch: str) -> dict[str, DiffFile]:
         if raw.startswith("+"):
             current.changed_lines.add(new_line)
             current.hunk_lines.add(new_line)
+            current.added_lines[new_line] = raw[1:]
             new_line += 1
         elif raw.startswith("-"):
-            continue
+            current.removed_lines[old_line] = raw[1:]
+            old_line += 1
         elif raw.startswith(" ") or raw == "":
             current.hunk_lines.add(new_line)
+            old_line += 1
             new_line += 1
 
     return files
@@ -218,15 +244,18 @@ def normalise_path(path: str) -> str:
     return cleaned
 
 
-def resolve_finding(finding: Finding, diff_files: dict[str, DiffFile]) -> PlacedFinding:
+def resolve_finding(finding: Finding, diff_files: dict[str, DiffFile], allow_left: bool = False) -> PlacedFinding:
     """Decide where a finding can be posted, if anywhere.
 
     Args:
         finding: The finding as the model wrote it.
         diff_files: The lines each changed file contributes.
+        allow_left: Whether a deleted line may resolve to the LEFT side.
 
     Returns:
-        The finding together with its resolved position and the reason for it.
+        The finding together with its resolved position and the reason for
+        it. A finding that cites a line the patch removed and ``allow_left``
+        is True resolves to the ``LEFT`` side.
     """
     path = normalise_path(finding.path)
     diff_file = diff_files.get(path)
@@ -237,6 +266,13 @@ def resolve_finding(finding: Finding, diff_files: dict[str, DiffFile]) -> Placed
             path = diff_file.path
     if diff_file is None:
         return PlacedFinding(finding=finding, path=None, line=None, status="unknown-path")
+
+    if diff_file.deleted and finding.line in diff_file.removed_lines:
+        if allow_left:
+            return PlacedFinding(
+                finding=finding, path=diff_file.path, line=finding.line, status="deleted", side="LEFT"
+            )
+        return PlacedFinding(finding=finding, path=path, line=None, status="unresolved-line")
 
     if finding.line in diff_file.changed_lines:
         return PlacedFinding(finding=finding, path=path, line=finding.line, status="changed")
@@ -1097,7 +1133,7 @@ def build_review_payload(
         {
             "path": placed.path,
             "line": placed.line,
-            "side": "RIGHT",
+            "side": placed.side,
             "body": placed.finding.body,
         }
         for placed in placed_findings
@@ -1108,6 +1144,312 @@ def build_review_payload(
         "event": "COMMENT",
         "comments": comments,
     }
+
+
+PROVIDER_BASE_URLS = {
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "local": os.environ.get("OMLX_BASE_URL", "http://127.0.0.1:8000/v1"),
+}
+PROVIDER_KEY_ENVIRONMENTS = {
+    "gemini": "GEMINI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+PROVIDER_MODELS = {
+    "opencode": DEFAULT_MODEL,
+    "gemini": "gemini-2.0-flash",
+    "openrouter": os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free"),
+    "local": os.environ.get("OMLX_MODEL", "default"),
+}
+PREVIEW_EXIT_NEUTRAL = 78
+
+
+def load_review_rubric(directory: Path) -> str:
+    """Read the review command body used as the reviewer prompt.
+
+    Args:
+        directory: The repository the review runs in.
+
+    Returns:
+        The command body, or a minimal fallback rubric when the file is absent.
+    """
+    command_path = Path(directory) / ".opencode" / "commands" / "review-pr.md"
+    try:
+        raw = command_path.read_text(encoding="utf-8")
+    except OSError:
+        LOGGER.warning("no review command at %s; using a minimal rubric", command_path)
+        return (
+            "# Pull Request Review\n\n"
+            "Review the pull request below and report genuine defects only, in the"
+            " `### <path>:<line>` block format, followed by a `## Summary` section.\n\n"
+            "## Target\n\n$ARGUMENTS\n"
+        )
+    if raw.startswith("---"):
+        end = raw.find("~~~", 3)
+        closing = raw.find("\n---", 3)
+        end = closing + 4 if closing != -1 else 0
+        raw = raw[end:]
+    return raw
+
+
+def provider_preflight(provider: str) -> str | None:
+    """Check whether a provider is ready to review.
+
+    Args:
+        provider: One of ``opencode``, ``gemini``, ``openrouter`` or ``local``.
+
+    Returns:
+        None when the provider is ready, otherwise the failure reason.
+    """
+    if provider == "opencode":
+        from shutil import which
+
+        if which("opencode") is None:
+            return "the opencode binary is not on PATH"
+        return None
+    key_environment = PROVIDER_KEY_ENVIRONMENTS.get(provider)
+    if key_environment is not None:
+        if not os.environ.get(key_environment):
+            return f"the {key_environment} environment variable is not set"
+        return None
+    if provider == "local":
+        try:
+            settings = _local_provider_settings()
+        except Exception as error:  # noqa: BLE001 - preflight must not raise
+            return f"could not read oMLX settings: {error}"
+        url = settings["base_url"].rstrip("/") + "/models"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310 - fixed scheme
+                response.read()
+        except (urllib.error.URLError, OSError, TimeoutError) as error:
+            return f"the oMLX server at {settings['base_url']} is not reachable: {error}"
+        return None
+    return f"unknown provider {provider!r}"
+
+
+def _local_provider_settings() -> dict[str, str]:
+    """Resolve the oMLX OpenAI-compatible settings.
+
+    Returns:
+        A mapping with ``base_url`` and ``api_key``.
+    """
+    base_url = os.environ.get("OMLX_BASE_URL")
+    api_key = os.environ.get("OMLX_API_KEY")
+    if base_url is None:
+        try:
+            from jobhunt.config import get_omlx_settings
+
+            settings = get_omlx_settings()
+            base_url = settings.base_url  # type: ignore[attr-defined]
+            api_key = api_key or getattr(settings, "api_key", "")  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - fall back to documented defaults
+            base_url = PROVIDER_BASE_URLS["local"]
+    return {"base_url": base_url.rstrip("/") + "/v1" if "://" in str(base_url) and not str(base_url).rstrip("/").endswith("v1") else str(base_url).rstrip("/"), "api_key": api_key or ""}
+
+
+def openai_chat_completion(base_url: str, api_key: str, model: str, messages: list[dict]) -> str:
+    """Call an OpenAI-compatible ``chat/completions`` endpoint.
+
+    Args:
+        base_url: The API root, without a trailing ``chat/completions``.
+        api_key: The bearer token, or an empty string when none is needed.
+        model: The model identifier to request.
+        messages: The chat messages.
+
+    Returns:
+        The assistant message text.
+
+    Raises:
+        ReviewError: If the request fails or the answer is empty.
+    """
+    body = {"model": model, "messages": messages, "temperature": 0.0, "stream": False}
+    url = base_url.rstrip("/") + "/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")[:400]
+        raise ReviewError(f"chat completion returned {error.code}: {detail}") from error
+    except (urllib.error.URLError, OSError, TimeoutError) as error:
+        raise ReviewError(f"chat completion failed: {error}") from error
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ReviewError(f"chat completion returned invalid JSON: {error}") from error
+    answer = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content")
+    if not answer or not str(answer).strip():
+        raise ReviewError("chat completion returned an empty answer")
+    return str(answer)
+
+
+def resolve_provider_connection(provider: str, model: str, key_env: str | None = None) -> tuple[str, str, str]:
+    """Resolve the endpoint, key, and model for a direct provider call.
+
+    Args:
+        provider: One of ``gemini``, ``openrouter`` or ``local``.
+        model: The model override, or the empty string for the provider default.
+        key_env: Environment variable holding the API key; defaults to the
+            provider's own variable.
+
+    Returns:
+        A tuple of base URL, API key and model identifier.
+
+    Raises:
+        ReviewError: If the provider has no usable credentials or settings.
+    """
+    if provider not in {"gemini", "openrouter", "local"}:
+        raise ReviewError(f"provider {provider!r} cannot be called directly; use the opencode driver")
+    if provider == "local":
+        settings = _local_provider_settings()
+        base_url, api_key = settings["base_url"], settings["api_key"]
+        used_model = model or PROVIDER_MODELS["local"]
+        if not base_url:
+            raise ReviewError("no oMLX base URL available; set OMLX_BASE_URL")
+        return base_url, api_key, used_model
+    base_url = PROVIDER_BASE_URLS[provider]
+    environment = key_env or PROVIDER_KEY_ENVIRONMENTS[provider]
+    api_key = os.environ.get(environment, "")
+    if not api_key:
+        raise ReviewError(f"the {environment} environment variable is not set")
+    return base_url, api_key, model or PROVIDER_MODELS.get(provider, model)
+
+
+def review_pull_request_direct(
+    number: int,
+    provider: str,
+    model: str,
+    directory: Path,
+    timeout: float,
+    max_files: int,
+    dry_run: bool,
+    output_path: Path | None,
+    key_env: str | None = None,
+) -> int:
+    """Review a pull request against an OpenAI-compatible provider.
+
+    This is the fallback driver that bypasses OpenCode when its free tier is
+    exhausted. It reuses the rubric, the finding parser and the posting logic
+    of the OpenCode driver.
+
+    Args:
+        number: The pull request number.
+        provider: The direct provider to call.
+        model: The model override, or the empty string for the provider default.
+        directory: The directory the review runs in.
+        timeout: Reserved for parity with the OpenCode driver.
+        max_files: The largest number of files to list.
+        dry_run: When True, print the review instead of posting it.
+        output_path: Where to write the raw model output, if anywhere.
+
+    Returns:
+        The number of inline comments posted.
+
+    Raises:
+        ReviewError: If the review cannot be produced or posted.
+    """
+    del timeout  # the HTTP request timeout bounds the single API call
+    pull_request = fetch_pull_request(number)
+    if pull_request.get("state") != "OPEN":
+        raise ReviewError(f"pull request #{number} is {pull_request.get('state')}, not OPEN")
+
+    patch = fetch_pull_request_diff(number)
+    diff_files = parse_unified_diff(patch)
+    if not diff_files:
+        raise ReviewError(f"pull request #{number} has no diff to review")
+
+    arguments = build_command_arguments(pull_request, diff_files, max_files, patch)
+    rubric = load_review_rubric(directory)
+    base_url, api_key, used_model = resolve_provider_connection(provider, model, key_env)
+
+    LOGGER.info("Reviewing PR #%s with %s via %s", number, used_model, provider)
+    LOGGER.info("Diff covers %d changed files", len(diff_files))
+
+    from datetime import datetime, timezone
+
+    prefix = (
+        f"Today's date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n\n"
+        "You are the read-only pr-reviewer. Follow the instructions verbatim.\n"
+    )
+    answer = openai_chat_completion(
+        base_url,
+        api_key,
+        used_model,
+        messages=[
+            {"role": "system", "content": prefix + rubric.strip()},
+            {"role": "user", "content": arguments},
+        ],
+    )
+    return publish_model_answer(answer, pull_request, diff_files, used_model, dry_run, output_path)
+
+
+def publish_model_answer(
+    answer: str,
+    pull_request: dict,
+    diff_files: dict[str, DiffFile],
+    model: str,
+    dry_run: bool,
+    output_path: Path | None,
+) -> int:
+    """Parse, place and post a model's review answer.
+
+    Args:
+        answer: The raw model output with findings and a summary.
+        pull_request: The pull request metadata.
+        diff_files: The lines each changed file contributes.
+        model: The model that produced the review.
+        dry_run: When True, print the payload instead of posting it.
+        output_path: Where to write the raw answer, if anywhere.
+
+    Returns:
+        The number of inline comments posted.
+    """
+    if output_path is not None:
+        output_path.write_text(answer, encoding="utf-8")
+        LOGGER.info("Wrote raw review output to %s", output_path)
+
+    findings, summary = parse_findings(answer)
+    LOGGER.info("Parsed %d findings from the review", len(findings))
+
+    placed: list[PlacedFinding] = []
+    unplaced: list[PlacedFinding] = []
+    for finding in findings:
+        resolved = resolve_finding(finding, diff_files)
+        LOGGER.info(
+            "Finding %s:%s -> %s%s",
+            finding.path,
+            finding.line,
+            resolved.status,
+            f" (line {resolved.line})" if resolved.line is not None else "",
+        )
+        if resolved.line is None:
+            unplaced.append(resolved)
+        else:
+            placed.append(resolved)
+
+    if not findings:
+        LOGGER.info("The review found nothing to report")
+        return 0
+
+    payload = build_review_payload(placed, unplaced, summary, model, pull_request["headRefOid"])
+    if dry_run:
+        print(json.dumps(payload, indent=2))
+        return len(placed)
+
+    number = pull_request["number"]
+    repository = fetch_repository_name()
+    try:
+        post_review(repository, number, payload)
+    except ReviewError as error:
+        LOGGER.warning("the review was rejected as a whole, posting comments one by one: %s", error)
+        post_comments_individually(repository, number, payload)
+    print(f"Posted {len(placed)} inline comment(s) on PR #{number}.")
+    if unplaced:
+        print(f"Added {len(unplaced)} finding(s) to the review body.")
+    return len(placed)
 
 
 def review_pull_request(
@@ -1180,45 +1522,7 @@ def review_pull_request(
     if output_path is not None:
         output_path.write_text(answer, encoding="utf-8")
         LOGGER.info("Wrote raw review output to %s", output_path)
-
-    findings, summary = parse_findings(answer)
-    LOGGER.info("Parsed %d findings from the review", len(findings))
-
-    placed: list[PlacedFinding] = []
-    unplaced: list[PlacedFinding] = []
-    for finding in findings:
-        resolved = resolve_finding(finding, diff_files)
-        LOGGER.info(
-            "Finding %s:%s -> %s%s",
-            finding.path,
-            finding.line,
-            resolved.status,
-            f" (line {resolved.line})" if resolved.line is not None else "",
-        )
-        if resolved.line is None:
-            unplaced.append(resolved)
-        else:
-            placed.append(resolved)
-
-    if not findings:
-        LOGGER.info("The review found nothing to report")
-        return 0
-
-    payload = build_review_payload(placed, unplaced, summary, model, pull_request["headRefOid"])
-    if dry_run:
-        print(json.dumps(payload, indent=2))
-        return len(placed)
-
-    repository = fetch_repository_name()
-    try:
-        post_review(repository, number, payload)
-    except ReviewError as error:
-        LOGGER.warning("the review was rejected as a whole, posting comments one by one: %s", error)
-        post_comments_individually(repository, number, payload)
-    print(f"Posted {len(placed)} inline comment(s) on PR #{number}.")
-    if unplaced:
-        print(f"Added {len(unplaced)} finding(s) to the review body.")
-    return len(placed)
+    return publish_model_answer(answer, pull_request, diff_files, model, dry_run, output_path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1231,28 +1535,64 @@ def main(argv: list[str] | None = None) -> int:
         The process exit code.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pr-number", required=True, type=int, help="The pull request number to review.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="The model to review with, as provider/model-id.")
+    parser.add_argument("--pr-number", type=int, default=None, help="The pull request number to review.")
+    parser.add_argument(
+        "--provider",
+        default="opencode",
+        choices=sorted(set(PROVIDER_BASE_URLS) | {"opencode"}),
+        help="The reviewer backend to use.",
+    )
+    parser.add_argument(
+        "--api-key-env",
+        default=None,
+        help="Environment variable holding the provider API key (default: per-provider).",
+    )
+    parser.add_argument("--model", default=None, help="The model to review with, as provider/model-id.")
     parser.add_argument("--command", default=DEFAULT_COMMAND, help="The OpenCode command to run.")
     parser.add_argument("--directory", default=".", help="The directory the review runs in.")
     parser.add_argument("--timeout", default=DEFAULT_TIMEOUT_SECONDS, type=float, help="Seconds to allow the review to take.")
     parser.add_argument("--max-files", default=DEFAULT_MAX_FILES, type=int, help="Most files to list for the model.")
     parser.add_argument("--output", type=Path, default=None, help="Where to write the raw model output.")
     parser.add_argument("--dry-run", action="store_true", help="Print the review instead of posting it.")
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Exit 0 when the provider is ready, 78 (neutral) when it is not; no review runs.",
+    )
     arguments = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
+    if arguments.api_key_env:
+        if arguments.provider in PROVIDER_KEY_ENVIRONMENTS and not os.environ.get(arguments.api_key_env):
+            raise SystemExit(f"{arguments.provider} needs an API key in {arguments.api_key_env}")
+
+    if arguments.preflight:
+        reason = provider_preflight(arguments.provider)
+        if reason is not None:
+            LOGGER.error("provider %s not ready: %s", arguments.provider, reason)
+            return PREVIEW_EXIT_NEUTRAL
+        print(f"provider {arguments.provider} is ready")
+        return 0
+
+    if arguments.pr_number is None:
+        parser.error("--pr-number is required unless --preflight is given")
+
+    if arguments.model is None:
+        arguments.model = PROVIDER_MODELS.get(arguments.provider, DEFAULT_MODEL)
     try:
-        review_pull_request(
+        common = dict(
             number=arguments.pr_number,
             model=arguments.model,
-            command=arguments.command,
             directory=Path(arguments.directory).resolve(),
             timeout=arguments.timeout,
             max_files=arguments.max_files,
             dry_run=arguments.dry_run,
             output_path=arguments.output,
         )
+        if arguments.provider == "opencode":
+            review_pull_request(command=arguments.command, **common)
+        else:
+            review_pull_request_direct(provider=arguments.provider, key_env=arguments.api_key_env, **common)
     except ReviewError as error:
         LOGGER.error("%s", error)
         if arguments.output is not None:
