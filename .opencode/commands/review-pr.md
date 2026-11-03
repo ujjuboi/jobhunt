@@ -1,12 +1,13 @@
 ---
 description: Review a pull request and emit inline findings as `path:line` blocks that the CI job converts to GitHub inline review comments. Usage: /review-pr <pull request #N>.
+agent: pr-reviewer
 ---
 
 # Pull Request Review
 
 Review the pull request described below and report genuine defects as inline
 findings. The target below is authoritative: it names the pull request, the
-commits, and the exact line numbers that may be cited.
+commits, the exact line numbers that may be cited, and the patch.
 
 ## Target
 
@@ -14,11 +15,14 @@ $ARGUMENTS
 
 ## Method
 
-1. Fetch the change with `gh pr diff <number>` using the pull request number
-   from the target above. If that command fails, fall back to
-   `git diff -U0 <base>...<head>` with the commits from the target.
-2. Read the **entire** content of every file the diff touches. A hunk in
-   isolation hides bugs; the surrounding code shows whether a problem is real.
+1. Use the patch in the target as the source of the change. If the target has no
+   patch, fetch it with `gh pr diff <number>` using the pull request number. If
+   that fails, fall back to `git diff -U0 <base>...<head>` with the commits
+   from the target.
+2. Read only the changed files and the functions or classes the hunks touch.
+   Open a file when a hunk is ambiguous; do not read installed dependencies,
+   lockfiles, dependency manifests, unrelated modules, or whole files "for
+   context". Skip tests unless the patch changes them.
 3. Look only for real defects:
    - logic errors and inverted or short-circuit conditions
    - unhandled edge cases (empty input, zero, `None`, missing keys, off-by-one)
@@ -31,8 +35,9 @@ $ARGUMENTS
 4. Do not report style, naming, formatting, missing type hints, or speculative
    refactors. Do not praise the change. Do not report a problem you are not
    certain about.
-5. Verify a candidate defect before reporting it: re-read the surrounding code
-   and, when it is cheap, run a command that demonstrates the behaviour.
+5. Verify a candidate defect by re-reading the surrounding code. Do not run the
+   test suite, start the application, or write probe scripts; the review is
+   read-only and has a small step budget.
 
 ## Output
 
