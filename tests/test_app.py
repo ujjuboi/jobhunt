@@ -294,7 +294,7 @@ def test_active_nav_highlight_follows_screen(monkeypatch):
             assert_active_tab("dashboard")
 
             # Click search_jobs quick action (which goes to search screen)
-            await pilot.click("#search_jobs_btn")
+            await pilot.click("#search_btn")
             await asyncio.sleep(0.1)
             assert_active_tab("search")
 
