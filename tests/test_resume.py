@@ -29,8 +29,12 @@ def test_resume_manager_missing_dir(tmp_path):
 
 def test_resume_manager_uses_real_resumes_dir():
     """ResumeManager resolves ../../Resumes/ relative to the project root."""
+    import pathlib
+    expected = (PROJECT_ROOT / ".." / ".." / "Resumes").resolve()
+    if not expected.exists():
+        pytest.skip(f"Resume directory not present at {expected}")
     manager = ResumeManager()
-    assert manager.base_resume_dir == (PROJECT_ROOT / ".." / ".." / "Resumes").resolve()
+    assert manager.base_resume_dir == expected
 
 
 def test_resume_manager_api_surface():

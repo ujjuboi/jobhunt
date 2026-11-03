@@ -527,12 +527,22 @@ class NavBar(Horizontal):
         super().__init__(*args, id="nav_bar", **kwargs)
 
     def compose(self):
-        """Yield plain Buttons for every nav button, gating Search."""
+        """Yield plain Buttons for every nav button, gating Search.
+
+        The dashboard button starts with ``.active`` so the highlight is
+        correct even if ``on_mount`` hasn't fired yet (CI headless builds
+        can render faster than the ``asyncio.sleep(0.1)`` in some tests).
+        """
         from jobhunt.config.user_config import keyword_search_available
+
+        active = self.app.active_tab if hasattr(self, "app") else "dashboard"
 
         for button_id, screen, label in NAV_BUTTONS:
             if screen != "search" or keyword_search_available():
-                yield Button(label, id=button_id)
+                button = Button(label, id=button_id)
+                if button_id == f"{active}_btn":
+                    button.add_class("active")
+                yield button
 
     def on_mount(self) -> None:
         """Apply the active class to the current tab button."""
