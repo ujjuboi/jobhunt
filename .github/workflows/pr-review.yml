@@ -91,7 +91,7 @@ jobs:
     timeout-minutes: 12
     continue-on-error: true
     needs: [conventions, tests]
-    if: ${{ env.GEMINI_API_KEY != '' || env.OPENROUTER_API_KEY != '' }}
+    if: ${{ secrets.GEMINI_API_KEY != '' || secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - name: Check out the pull request head
         uses: actions/checkout@v6
