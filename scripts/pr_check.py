@@ -2183,8 +2183,6 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--post", action="store_true", help="Post findings as inline PR review comments.")
     parser.add_argument("--dry-run", action="store_true", help="Print the payload instead of posting it.")
     arguments = parser.parse_args(argv)
-    if arguments.pr_number is not None and (arguments.base or arguments.all):
-        parser.error("--pr-number cannot be combined with --base or --all")
     if arguments.all and arguments.base:
         parser.error("--all cannot be combined with --base")
     if arguments.pr_number is None and not arguments.all and not arguments.base:
@@ -2211,17 +2209,19 @@ def main(argv: list[str] | None = None) -> int:
     repository_root = Path(arguments.repository_root).resolve()
     config = load_config(arguments.config)
     try:
-        if arguments.pr_number is not None:
-            base_ref, head_ref, paths = pull_request_refs(arguments.pr_number)
-            if arguments.head and arguments.head != head_ref:
-                LOGGER.warning("--head %s differs from the pull request head %s", arguments.head, head_ref)
-        elif arguments.all:
-            base_ref = None
+        base_ref = None
+        head_ref = arguments.head or "HEAD"
+        paths = []
+
+        if arguments.all:
             paths = changed_paths(repository_root, None, None)
-        else:
+        elif arguments.base is not None:
             base_ref = arguments.base
-            head_ref = arguments.head or "HEAD"
-            paths = []
+            paths = changed_paths(repository_root, base_ref, arguments.head)
+        elif arguments.pr_number is not None:
+            base_ref, head_ref, paths = pull_request_refs(arguments.pr_number)
+        else:
+            parser.error("one of --pr-number, --base or --all is required")
     except (CheckError, OSError) as error:
         LOGGER.error("%s", error)
         return 2
