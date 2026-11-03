@@ -91,7 +91,6 @@ jobs:
     timeout-minutes: 12
     continue-on-error: true
     needs: [conventions, tests]
-    if: ${{ secrets.GEMINI_API_KEY != '' || secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - name: Check out the pull request head
         uses: actions/checkout@v6
@@ -115,18 +114,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OMLX_BASE_URL: ${{ vars.OMLX_BASE_URL }}
         run: |
-          if [ -n "$GEMINI_API_KEY" ]; then
+          if python scripts/pr_review.py --provider gemini --preflight 2>/dev/null; then
             python scripts/pr_review.py \
               --provider gemini \
               --pr-number "$PR_NUMBER" \
               --directory "$GITHUB_WORKSPACE" \
               --output "$RUNNER_TEMP/review-output.md"
-          else
+          elif python scripts/pr_review.py --provider openrouter --preflight 2>/dev/null; then
             python scripts/pr_review.py \
               --provider openrouter \
               --pr-number "$PR_NUMBER" \
               --directory "$GITHUB_WORKSPACE" \
               --output "$RUNNER_TEMP/review-output.md"
+          else
+            echo "No provider key configured — LLM review skipped (best effort)"
           fi
 
       - name: Publish the review summary
