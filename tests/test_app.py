@@ -280,8 +280,10 @@ def test_active_nav_highlight_follows_screen(monkeypatch):
             await asyncio.sleep(0.1)
             # Dashboard is the initial screen
             assert_active_tab("dashboard")
-            non_dashboard_btn = app.screen.query_one("#chat_btn", Button)
-            assert not non_dashboard_btn.has_class("active")
+            non_dashboard_btn_chat = app.screen.query_one("#chat_btn", Button)
+            non_dashboard_btn_jobs = app.screen.query_one("#jobs_btn", Button)
+            assert not non_dashboard_btn_chat.has_class("active")
+            assert not non_dashboard_btn_jobs.has_class("active")
 
             # Click chat nav button
             await pilot.click("#chat_btn")
@@ -293,10 +295,10 @@ def test_active_nav_highlight_follows_screen(monkeypatch):
             await asyncio.sleep(0.1)
             assert_active_tab("dashboard")
 
-            # Click search_jobs quick action (which goes to search screen)
-            await pilot.click("#search_btn")
+            # Click jobs nav button
+            await pilot.click("#jobs_btn")
             await asyncio.sleep(0.1)
-            assert_active_tab("search")
+            assert_active_tab("jobs")
 
             # Revisit an already-mounted screen and verify re-applied highlight
             await pilot.click("#chat_btn")
