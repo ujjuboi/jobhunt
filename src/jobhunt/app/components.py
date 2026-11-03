@@ -529,18 +529,18 @@ class NavBar(Horizontal):
     def compose(self):
         """Yield plain Buttons for every nav button, gating Search.
 
-        The dashboard button starts with ``.active`` so the highlight is
-        correct even if ``on_mount`` hasn't fired yet (CI headless builds
-        can render faster than the ``asyncio.sleep(0.1)`` in some tests).
+        The dashboard button always starts with ``.active`` so the highlight
+        is present even when ``on_mount`` has not yet fired (CI headless
+        builds can render faster than the ``asyncio.sleep(0.1)`` in some
+        tests).  ``on_mount`` will re-apply the class if the active tab
+        changes.
         """
         from jobhunt.config.user_config import keyword_search_available
-
-        active = self.app.active_tab if hasattr(self, "app") else "dashboard"
 
         for button_id, screen, label in NAV_BUTTONS:
             if screen != "search" or keyword_search_available():
                 button = Button(label, id=button_id)
-                if button_id == f"{active}_btn":
+                if button_id == "dashboard_btn":
                     button.add_class("active")
                 yield button
 
@@ -587,12 +587,17 @@ class NavBar(Horizontal):
         focused input must keep focus instead of being replaced by the nav
         bar.
         """
+        from textual.css.query import NoMatches
+
         focused = self.app.focused
         if focused is not None and not any(
             focused is button for button in self.query(Button)
         ):
             return
-        active_button = self.query(Button).filter(".active").first()
+        try:
+            active_button = self.query(Button).filter(".active").first()
+        except NoMatches:
+            return
         if active_button is not None and active_button.can_focus:
             active_button.focus()
 
