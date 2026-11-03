@@ -1,6 +1,6 @@
 # Plan: Deterministic PR Checker + Provider Fallback
 
-**Status:** PLAN
+**Status:** DONE — implemented as `scripts/pr_check.py` (JH001–JH021 rules, with JH012 narrowed to tests that would hit the network directly), `tests/test_pr_check.py`, `.prcheck.toml`, the split workflow (`conventions` / `tests` / `llm-review`), and `--provider|--api-key-env|--preflight` on `scripts/pr_review.py`. See `docs/PR_REVIEW.md`.
 **Trigger:** CI free-tier quota exhaustion; PR #30.
 **Scope:** Three phases — deterministic convention checker (Phase A), docs-in-sync rules (Phase B), free LLM provider fallback (Phase C).
 

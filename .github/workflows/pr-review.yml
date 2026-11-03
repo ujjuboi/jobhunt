@@ -25,12 +25,21 @@ concurrency:
 env:
   PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   REVIEW_MODEL: ${{ github.event.inputs.model || 'opencode/big-pickle' }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  # Secrets cannot be read in `if:` conditions, so map them at workflow level
+  # and gate the LLM job on the environment variables instead.
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
 jobs:
-  review:
-    name: Review pull request
+  conventions:
+    name: Conventions (deterministic)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Check out the pull request head
         uses: actions/checkout@v6
@@ -44,19 +53,82 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install OpenCode
-        run: curl -fsSL https://opencode.ai/v2/install | bash
-
-      - name: Review the pull request
+      - name: Run the deterministic checker
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        id: prcheck
+        continue-on-error: false
         run: |
-          python scripts/pr_review.py \
+          python scripts/pr_check.py \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
             --pr-number "$PR_NUMBER" \
-            --model "$REVIEW_MODEL" \
-            --directory "$GITHUB_WORKSPACE" \
-            --output "$RUNNER_TEMP/review-output.md"
+            --post
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the test suite
+        run: uv run pytest -q
+
+  llm-review:
+    name: OpenCode review (best effort)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    continue-on-error: true
+    needs: [conventions, tests]
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the LLM review against a free provider
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OMLX_BASE_URL: ${{ vars.OMLX_BASE_URL }}
+        run: |
+          if python scripts/pr_review.py --provider gemini --preflight 2>/dev/null; then
+            python scripts/pr_review.py \
+              --provider gemini \
+              --pr-number "$PR_NUMBER" \
+              --directory "$GITHUB_WORKSPACE" \
+              --output "$RUNNER_TEMP/review-output.md"
+          elif python scripts/pr_review.py --provider openrouter --preflight 2>/dev/null; then
+            python scripts/pr_review.py \
+              --provider openrouter \
+              --pr-number "$PR_NUMBER" \
+              --directory "$GITHUB_WORKSPACE" \
+              --output "$RUNNER_TEMP/review-output.md"
+          else
+            echo "No provider key configured — LLM review skipped (best effort)"
+          fi
 
       - name: Publish the review summary
         if: always()

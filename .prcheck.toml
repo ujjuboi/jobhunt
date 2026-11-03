@@ -1,0 +1,22 @@
+# Deterministic PR checker suppression config.
+#
+# `disable`: rule ids that never run (comma separated list of JH identifiers).
+# `allow`: glob patterns matched against "<rule>:<path>"; matching findings are
+#   advisory-suppressed and echoed into every report. Use for *existing* debt
+#   the codebase has consciously accepted — each entry must document why.
+
+[check]
+disable = []
+
+allow = [
+    # pre-existing debt: profile parser accessors deliberately return None on
+    # failure to keep the resume pipeline resilient (tracked in the PR review
+    # backlog before this checker existed).
+    "JH002:src/jobhunt/resume/profile_parser.py",
+    # pre-existing debt: linkedin scraping wraps site lookups that can fail per
+    # session; failures are surfaced to the caller by other means.
+    "JH002:src/jobhunt/sources/linkedin.py",
+    # pre-existing debt: the logging setup deliberately ignores unlink errors
+    # when rotating its own handlers.
+    "JH002:src/jobhunt/logging.py",
+]
