@@ -1,31 +1,112 @@
 # Pull Request Review
 
-JobHunt reviews its own pull requests. A GitHub Actions workflow runs OpenCode
-against an open pull request and posts the result as **inline review comments**
-on the changed lines.
+JobHunt reviews its own pull requests with a **two-tier pipeline**:
 
-The review is free: it runs on OpenCode's free model tier, so it needs no API
-key and no Copilot subscription.
+1. **Conventions + tests (required).** A deterministic, model-free checker
+   (`scripts/pr_check.py`) encodes `AGENTS.md` and `docs/` as rules. It has no
+   model, no network, no secrets, and finishes in seconds, so it never dies on
+   a provider's free-tier quota. The `tests` job runs the test suite next to
+   it, without secrets.
+2. **OpenCode review (best effort).** The model review is a separate,
+   non-blocking job. It uses OpenCode's free tier when available, or
+   OpenAI-compatible free providers (Gemini, OpenRouter) via an API key, or a
+   local oMLX server when run locally.
+
+The review is [inline review comments](#placing-the-comments) on the changed
+lines; the deterministic job degrades to the `$GITHUB_STEP_SUMMARY` when a
+read-only token cannot post reviews.
 
 ## How It Works
 
 ```
-.github/workflows/pr-review.yml   the workflow
+.github/workflows/pr-review.yml   the workflow: conventions + tests + llm-review
+scripts/pr_check.py               the deterministic rule checker
 .opencode/commands/review-pr.md   the review command the model runs
 .opencode/agents/pr-reviewer.md   the read-only reviewer agent
-scripts/pr_review.py              the driver: session, parsing, posting
+scripts/pr_review.py              the LLM driver: session, parsing, posting
 ```
 
-1. The workflow checks out the pull request head and installs OpenCode v2.
-2. `scripts/pr_review.py` reads the pull request metadata and patch with the
-   GitHub CLI, then works out which lines of each file the patch touches.
-3. It starts a private OpenCode server, opens a session on the checkout, and
-   runs the `review-pr` command with the pull request, its commits, the
-   citable lines, and the patch as the command's arguments.
-4. The command selects the read-only `pr-reviewer` agent. The model answers
-   with findings in a fixed format and a summary.
-5. The driver checks every cited line against the patch and posts one pull
-   request review holding the inline comments and the summary.
+1. The `conventions` job checks out the pull request head, resolves the base
+   and head commits, and runs `pr_check.py` against the two trees.
+2. The checker runs each rule against the head tree and the base tree and
+   reports only *new* debt: a violation whose key `(rule, path, symbol)`
+   already exists in the base tree is assumed to be accepted and not reported.
+3. Findings are posted as inline PR review comments through the same payload
+   builder as `pr_review.py`; on a read-only token the report is written to
+   the step summary instead and the job keeps its verdict.
+4. The optional `llm-review` job starts a private OpenCode server (or calls a
+   free provider directly), sends the rubric and the patch, parses the findings
+   the same way, and posts one review with the inline comments and summary.
+
+## The Rule Catalogue
+
+| ID | Severity | Rule |
+|---|---|---|
+| JH001 | blocking | print or pprint in library code (`src/**`, outside `cli.py`) |
+| JH002 | blocking | swallowed errors: pass-only, empty-return, silent broad except |
+| JH003 | blocking | unguarded `self.agent` access in `app/**` |
+| JH004 | blocking | `compose()` defined on a BaseScreen subclass |
+| JH005 | blocking | raw error strings appended to `self.messages` |
+| JH006 | blocking | blocking I/O inside `async def` |
+| JH013 | blocking | documented widget IDs missing from `app/**` |
+| JH014 | blocking | `CREATE TABLE` columns not matching `DATABASE_AND_CONFIG.md` |
+| JH015 | blocking | documented `JobHuntDB` methods missing from the class |
+| JH018 | blocking | `pr-reviewer` agent missing read-only denies |
+| JH019 | blocking | workflow safety: `pull_request_target`, unpinned actions, secrets in `run:`, broad permissions |
+| JH007 | advisory | module logger not using `__name__` |
+| JH008 | advisory | abbreviated names on new parameters or targets |
+| JH009 | blocking | `JobHuntDB(...)` / `get_db(...)` called with `db_path=` |
+| JH010 | advisory | screens built with `db=` instead of `database=` |
+| JH011 | advisory | `time.sleep` in a test function body |
+| JH012 | blocking | tests hitting the network without `@pytest.mark.integration` |
+| JH016 | advisory | documented source adapters missing from `sources/**` |
+| JH017 | advisory | documented scoring constants missing from `scoring/**` |
+| JH020 | advisory | `[project.scripts]` targets missing from source |
+| JH021 | advisory | new public module/class/function without a docstring |
+
+What the checker **will not** catch: logic bugs. A semantic review still needs
+a model, which is why the LLM job exists as an optional layer.
+
+## Suppression
+
+Findings can be silenced two ways:
+
+- Inline, on the offending line or the one above it, with a **mandatory**
+  reason: `# prcheck: ignore JH003 reason-why-this-is-ok`. A bare
+  `ignore JH003` without a reason does not suppress anything.
+- By configuration in `.prcheck.toml`: `check.disable` turns rules off
+  entirely, and `check.allow` lists glob patterns matched against
+  `rule:path` (for example `JH002:src/jobhunt/sources/linkedin.py`) for
+  *existing, accepted debt*.
+
+Every suppression is echoed into the report so nothing is silenced silently.
+
+## Running The Checker
+
+```bash
+uv run python scripts/pr_check.py --all            # full repository scan
+uv run python scripts/pr_check.py --base 3efb2b6   # new debt against a commit
+uv run python scripts/pr_review.py --provider local --pr-number 30   # local oMLX LLM review
+```
+
+The checker exits `1` when a blocking finding remains, `0` otherwise, and
+`2` on an internal error. `--json` prints machine-readable findings,
+`--dry-run --post` prints the review payload instead of posting it.
+
+## Provider Fallback
+
+`scripts/pr_review.py` accepts `--provider {opencode|gemini|openrouter|local}`:
+
+| Provider | Cost | Notes |
+|---|---|---|
+| `opencode` | free tier | the default driver; fragile on shared CI egress IPs |
+| `gemini` | free tier per project | OpenAI-compatible endpoint; `GEMINI_API_KEY` secret |
+| `openrouter` | ~50 req/day free | `OPENROUTER_API_KEY` secret; model via `OPENROUTER_MODEL` |
+| `local` | free | local oMLX server; resolve base URL via `OMLX_BASE_URL` or `jobhunt.config` |
+
+`--preflight` exits `0` when the provider is ready and `78` (neutral/skip)
+when it is not, letting a job gate itself without failing. `--api-key-env`
+names the environment variable that holds the API key.
 
 ## The Review Command
 
@@ -78,6 +159,9 @@ the model found disappears without a trace.
 
 The workflow triggers on `opened`, `synchronize`, `reopened` and
 `ready_for_review`, and can be started by hand from the Actions tab.
+
+The `PR Review` required check now means "**conventions + tests passed**";
+the model review is allowed to fail or be skipped without blocking a merge.
 
 ````text
 Pull request: #28
