@@ -23,6 +23,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +34,11 @@ DEFAULT_COMMAND = "review-pr"
 DEFAULT_PORT = 4097
 DEFAULT_TIMEOUT_SECONDS = 1200
 DEFAULT_MAX_FILES = 40
+DEFAULT_MAX_DIFF_CHARS = 120_000
+MESSAGE_PAGE_SIZE = 100
+STALL_TIMEOUT_SECONDS = 300
+REQUEST_TIMEOUT_SECONDS = 120
+DRIVER_GRACE_SECONDS = 120
 SNAP_DISTANCE = 3
 
 HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -44,6 +50,10 @@ SERVER_PASSWORD = re.compile(r"server password (?P<password>\S+)")
 
 class ReviewError(RuntimeError):
     """Raised when the review cannot be produced or posted."""
+
+
+class DriverTimeoutError(ReviewError):
+    """Raised when a blocking review call ignores its own deadline."""
 
 
 @dataclass
@@ -286,17 +296,42 @@ def render_citable_lines(diff_files: dict[str, DiffFile], max_files: int) -> str
     return "\n".join(listed)
 
 
-def build_command_arguments(pull_request: dict, diff_files: dict[str, DiffFile], max_files: int) -> str:
+def diff_fence(patch: str) -> str:
+    """Choose a code fence that cannot be closed by the patch itself.
+
+    Args:
+        patch: The unified diff text.
+
+    Returns:
+        A backtick fence longer than any run of backticks in the patch.
+    """
+    longest = max((len(match) for match in re.findall(r"`+", patch)), default=0)
+    return "`" * max(3, longest + 1)
+
+
+def build_command_arguments(
+    pull_request: dict,
+    diff_files: dict[str, DiffFile],
+    max_files: int,
+    patch: str,
+) -> str:
     """Build the target description handed to the review command.
 
     Args:
         pull_request: The pull request metadata.
         diff_files: The lines each changed file contributes.
         max_files: The largest number of files to list.
+        patch: The unified diff of the pull request.
 
     Returns:
         The text substituted for ``$ARGUMENTS`` in the review command.
     """
+    if len(patch) > DEFAULT_MAX_DIFF_CHARS:
+        included = patch[:DEFAULT_MAX_DIFF_CHARS].rstrip()
+        included += "\n... patch truncated; read the remaining changed files directly."
+    else:
+        included = patch
+    fence = diff_fence(included)
     return (
         f"Pull request: #{pull_request['number']}\n"
         f"Title: {pull_request['title']}\n"
@@ -304,7 +339,10 @@ def build_command_arguments(pull_request: dict, diff_files: dict[str, DiffFile],
         f"Head commit: {pull_request['headRefOid']}\n"
         "\n"
         "Citable lines (new-file line numbers, cite these and no others):\n"
-        f"{render_citable_lines(diff_files, max_files)}"
+        f"{render_citable_lines(diff_files, max_files)}\n"
+        "\n"
+        "Patch (unified diff; this is the change under review):\n"
+        f"{fence}diff\n{included}\n{fence}\n"
     )
 
 
@@ -408,7 +446,13 @@ def post_comments_individually(repository: str, number: int, payload: dict) -> N
         run_gh(["api", "--method", "POST", endpoint, "--input", "-"], stdin=json.dumps({"body": summary}))
 
 
-def api_request(url: str, method: str = "GET", body: dict | None = None, password: str | None = None) -> dict:
+def api_request(
+    url: str,
+    method: str = "GET",
+    body: dict | None = None,
+    password: str | None = None,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+) -> dict:
     """Call the OpenCode HTTP API.
 
     Args:
@@ -416,12 +460,13 @@ def api_request(url: str, method: str = "GET", body: dict | None = None, passwor
         method: The HTTP method to use.
         body: The JSON body to send.
         password: The server password to authenticate with.
+        timeout: How long a single request may take.
 
     Returns:
         The decoded response body, or an empty mapping for an empty response.
 
     Raises:
-        ReviewError: If the request fails.
+        ReviewError: If the request fails or exceeds its timeout.
     """
     headers = {"Accept": "application/json"}
     if body is not None:
@@ -432,13 +477,17 @@ def api_request(url: str, method: str = "GET", body: dict | None = None, passwor
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
         raise ReviewError(f"{method} {url} returned {error.code}: {detail}") from error
+    except TimeoutError as error:
+        raise ReviewError(f"{method} {url} timed out after {timeout:.0f} seconds") from error
     except urllib.error.URLError as error:
         raise ReviewError(f"{method} {url} failed: {error.reason}") from error
+    except OSError as error:
+        raise ReviewError(f"{method} {url} failed: {error}") from error
     return json.loads(raw) if raw else {}
 
 
@@ -507,6 +556,17 @@ class OpenCodeServer:
                 raise ReviewError(f"opencode serve exited early: {' '.join(self._lines[-10:])}")
             time.sleep(0.5)
         raise ReviewError("opencode serve did not report a listening URL in time")
+
+    def recent_output(self, limit: int = 20) -> list[str]:
+        """Return the most recent lines the server printed.
+
+        Args:
+            limit: The largest number of lines to return.
+
+        Returns:
+            The tail of the server output.
+        """
+        return self._lines[-limit:]
 
     def close(self) -> None:
         """Stop the server."""
@@ -589,8 +649,196 @@ def run_review_command(base_url: str, password: str, session_id: str, command: s
     api_request(f"{base_url}/api/session/{session_id}/command", method="POST", body=payload, password=password)
 
 
+def fetch_session_messages(
+    base_url: str,
+    password: str,
+    session_id: str,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+) -> list[dict]:
+    """Read the most recent messages of a session.
+
+    The API returns its newest page in reverse order. The messages are sorted
+    oldest first so callers can scan them in the order they were produced.
+
+    Args:
+        base_url: The base URL of the OpenCode server.
+        password: The server password.
+        session_id: The session to inspect.
+        timeout: How long the request may take.
+
+    Returns:
+        The session messages, oldest first.
+
+    Raises:
+        ReviewError: If the messages cannot be read.
+    """
+    url = f"{base_url}/api/session/{session_id}/message?order=desc&limit={MESSAGE_PAGE_SIZE}"
+    response = api_request(url, password=password, timeout=timeout)
+    messages = response.get("data") or []
+    messages.sort(key=lambda message: (message.get("time") or {}).get("created") or 0)
+    return messages
+
+
+def _tool_detail(part: dict) -> str:
+    """Describe a tool call compactly enough for a log line.
+
+    Args:
+        part: A tool content part of an assistant message.
+
+    Returns:
+        The tool name with its command, path, or query.
+    """
+    state = part.get("state") or {}
+    arguments = state.get("input") or {}
+    detail = (
+        arguments.get("command")
+        or arguments.get("filePath")
+        or arguments.get("path")
+        or arguments.get("pattern")
+        or arguments.get("query")
+        or arguments.get("code")
+        or ""
+    )
+    detail = " ".join(str(detail).split())
+    if len(detail) > 160:
+        detail = detail[:160].rstrip() + "..."
+    name = part.get("name") or "tool"
+    return f"{name}: {detail}" if detail else str(name)
+
+
+def _log_new_messages(messages: list[dict], seen: set[str]) -> None:
+    """Log the parts that appeared since the previous poll.
+
+    An assistant message is streamed, so its tool calls arrive after the
+    message itself. Parts are tracked individually to log them as they land.
+
+    Args:
+        messages: The session messages, oldest first.
+        seen: Identifiers of the parts already logged. Updated in place.
+    """
+    for message in messages:
+        message_id = message.get("id")
+        if not message_id:
+            continue
+        if message.get("type") == "idle":
+            key = f"{message_id}:idle"
+            if key not in seen:
+                seen.add(key)
+                LOGGER.info("session idle with outcome %s", message.get("outcome"))
+            continue
+        if message.get("type") != "assistant":
+            continue
+
+        retry = message.get("retry")
+        if retry:
+            key = f"{message_id}:retry:{retry.get('attempt')}"
+            if key not in seen:
+                seen.add(key)
+                detail = (retry.get("error") or {}).get("message") or "no detail"
+                LOGGER.warning("model retry %s: %s", retry.get("attempt"), detail)
+
+        error = message.get("error")
+        if error:
+            key = f"{message_id}:error"
+            if key not in seen:
+                seen.add(key)
+                LOGGER.warning("model error: %s", error.get("message") or error)
+
+        for index, part in enumerate(message.get("content") or []):
+            if part.get("type") != "tool":
+                continue
+            key = f"{message_id}:tool:{part.get('id') or index}"
+            if key in seen:
+                continue
+            seen.add(key)
+            LOGGER.info("tool %s", _tool_detail(part))
+
+
+def _step_error(messages: list[dict]) -> str | None:
+    """Describe a terminal error on the latest assistant step.
+
+    Args:
+        messages: The session messages, oldest first.
+
+    Returns:
+        The error type and message, or None when the latest step did not fail.
+    """
+    last_assistant = next(
+        (message for message in reversed(messages) if message.get("type") == "assistant"),
+        None,
+    )
+    if not last_assistant or last_assistant.get("finish") != "error":
+        return None
+    if last_assistant.get("retry"):
+        return None
+    error = last_assistant.get("error") or {}
+    return f"{error.get('type') or 'error'}: {error.get('message') or 'no detail'}"
+
+
+def _idle_result(messages: list[dict]) -> tuple[str, str] | None:
+    """Find the terminal idle message of a session.
+
+    Args:
+        messages: The session messages, oldest first.
+
+    Returns:
+        The idle outcome and its error detail, or None while the session runs.
+    """
+    for message in reversed(messages):
+        if message.get("type") == "idle":
+            error = message.get("error") or {}
+            return (message.get("outcome") or "unknown", error.get("message") or "")
+    return None
+
+
+def run_with_deadline(call: Callable[[], str], seconds: float) -> str:
+    """Run a blocking call and give up when it overruns its deadline.
+
+    A socket timeout bounds each request, but a request can still stall past
+    the wait loop's own deadline. The loop therefore runs on a worker thread so
+    the driver always exits and reports the session state instead of sitting
+    until the CI job is killed.
+
+    Args:
+        call: The zero-argument callable to run.
+        seconds: How long to allow the call to take.
+
+    Returns:
+        Whatever the call returns.
+
+    Raises:
+        DriverTimeoutError: If the call does not return within the deadline.
+        ReviewError: If the call raises one.
+    """
+    outcome: dict[str, str | Exception] = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = call()
+        except Exception as error:
+            outcome["error"] = error
+
+    worker = threading.Thread(target=run, name="pr-review-wait", daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise DriverTimeoutError(
+            f"the review did not finish within {seconds:.0f} seconds and the driver stopped responding"
+        )
+    error = outcome.get("error")
+    if isinstance(error, ReviewError):
+        raise error
+    if isinstance(error, Exception):
+        raise ReviewError(f"the review failed: {error}") from error
+    return str(outcome.get("value") or "")
+
+
 def wait_for_review(base_url: str, password: str, session_id: str, timeout: float) -> str:
     """Wait for the review to finish and return the model's answer.
+
+    Progress is logged as messages arrive. A session that goes idle without an
+    answer, fails, is interrupted, or stops making progress ends the wait with
+    a descriptive error instead of running until the full timeout.
 
     Args:
         base_url: The base URL of the OpenCode server.
@@ -605,18 +853,74 @@ def wait_for_review(base_url: str, password: str, session_id: str, timeout: floa
         ReviewError: If the review fails or does not finish in time.
     """
     deadline = time.monotonic() + timeout
+    seen: set[str] = set()
+    last_updated: float | None = None
+    last_change = time.monotonic()
+
     while time.monotonic() < deadline:
-        response = api_request(f"{base_url}/api/session/{session_id}/message", password=password)
-        messages = response.get("data") or []
-        messages.sort(key=lambda message: (message.get("time") or {}).get("created") or 0)
+        remaining = max(1.0, deadline - time.monotonic())
+        request_timeout = min(REQUEST_TIMEOUT_SECONDS, remaining)
+        try:
+            messages = fetch_session_messages(
+                base_url,
+                password,
+                session_id,
+                timeout=request_timeout,
+            )
+        except ReviewError as error:
+            LOGGER.warning("could not read the review messages: %s", error)
+            time.sleep(5)
+            continue
+
+        _log_new_messages(messages, seen)
+
+        step_error = _step_error(messages)
+        if step_error is not None:
+            raise ReviewError(
+                f"the review step failed ({step_error}); "
+                + _session_diagnostics(base_url, password, session_id)
+            )
+
         answer = _final_answer(messages)
         if answer is not None:
             return answer
-        outcome = _session_outcome(base_url, password, session_id)
-        if outcome in {"failed", "error", "aborted"}:
-            raise ReviewError(f"the review session ended with outcome {outcome!r}")
+
+        idle = _idle_result(messages)
+        if idle is not None:
+            outcome, detail = idle
+            if outcome == "succeeded":
+                raise ReviewError(
+                    "the review session finished without a final answer; "
+                    + _session_diagnostics(base_url, password, session_id)
+                )
+            raise ReviewError(
+                f"the review session ended with outcome {outcome!r}: {detail or 'no error reported'}"
+            )
+
+        session = _session_info(base_url, password, session_id, timeout=request_timeout)
+        outcome = session.get("outcome")
+        if outcome in {"failed", "interrupted"}:
+            raise ReviewError(
+                f"the review session ended with outcome {outcome!r}; "
+                + _session_diagnostics(base_url, password, session_id)
+            )
+
+        updated = (session.get("time") or {}).get("updated")
+        if updated != last_updated:
+            last_updated = updated
+            last_change = time.monotonic()
+        elif time.monotonic() - last_change > STALL_TIMEOUT_SECONDS:
+            raise ReviewError(
+                f"the review made no progress for {STALL_TIMEOUT_SECONDS} seconds; "
+                + _session_diagnostics(base_url, password, session_id)
+            )
+
         time.sleep(5)
-    raise ReviewError(f"the review did not finish within {timeout:.0f} seconds")
+
+    raise ReviewError(
+        f"the review did not finish within {timeout:.0f} seconds; "
+        + _session_diagnostics(base_url, password, session_id)
+    )
 
 
 def _final_answer(messages: list[dict]) -> str | None:
@@ -642,23 +946,88 @@ def _final_answer(messages: list[dict]) -> str | None:
     return None
 
 
-def _session_outcome(base_url: str, password: str, session_id: str) -> str | None:
-    """Read the outcome of a session.
+def _session_info(
+    base_url: str,
+    password: str,
+    session_id: str,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+) -> dict:
+    """Read the state of a session.
 
     Args:
         base_url: The base URL of the OpenCode server.
         password: The server password.
         session_id: The session to inspect.
+        timeout: How long the request may take.
 
     Returns:
-        The outcome, or None when the session is still running.
+        The session state, or an empty mapping when it cannot be read.
     """
     try:
-        response = api_request(f"{base_url}/api/session/{session_id}", password=password)
+        response = api_request(
+            f"{base_url}/api/session/{session_id}",
+            password=password,
+            timeout=timeout,
+        )
+    except ReviewError as error:
+        LOGGER.debug("could not read the session state: %s", error)
+        return {}
+    return response.get("data") or response
+
+
+def _session_diagnostics(base_url: str, password: str, session_id: str) -> str:
+    """Collect the session state a failed review should report.
+
+    Args:
+        base_url: The base URL of the OpenCode server.
+        password: The server password.
+        session_id: The session that failed.
+
+    Returns:
+        A one-line summary of the outcome, pending permissions, and recent tools.
+    """
+    details: list[str] = []
+    session = _session_info(base_url, password, session_id)
+    if session:
+        details.append(f"outcome={session.get('outcome') or 'running'}")
+        if session.get("agent"):
+            details.append(f"agent={session['agent']}")
+
+    try:
+        response = api_request(f"{base_url}/api/session/{session_id}/permission", password=password)
+        pending = response.get("data") or []
     except ReviewError:
-        return None
-    session = response.get("data") or response
-    return session.get("outcome")
+        pending = []
+    if pending:
+        summaries = [
+            f"{item.get('action')}({', '.join(item.get('resources') or [])})" for item in pending[:3]
+        ]
+        details.append(f"pending permissions: {'; '.join(summaries)}")
+
+    try:
+        messages = fetch_session_messages(base_url, password, session_id)
+    except ReviewError:
+        messages = []
+    if messages:
+        details.append(f"last message={messages[-1].get('type')}")
+        last_assistant = next(
+            (message for message in reversed(messages) if message.get("type") == "assistant"),
+            None,
+        )
+        retry = (last_assistant or {}).get("retry") or {}
+        if retry:
+            retry_error = (retry.get("error") or {}).get("message") or "no detail"
+            details.append(f"retry {retry.get('attempt')}: {retry_error}")
+        recent_tools = [
+            _tool_detail(part)
+            for message in messages[-5:]
+            for part in (message.get("content") or [])
+            if part.get("type") == "tool"
+        ]
+        if recent_tools:
+            details.append(f"recent tools: {' | '.join(recent_tools[-3:])}")
+
+    return "; ".join(details) if details else "no session diagnostics"
 
 
 def build_review_body(summary: str, unplaced: list[PlacedFinding], model: str) -> str:
@@ -778,7 +1147,7 @@ def review_pull_request(
     if not diff_files:
         raise ReviewError(f"pull request #{number} has no diff to review")
 
-    arguments = build_command_arguments(pull_request, diff_files, max_files)
+    arguments = build_command_arguments(pull_request, diff_files, max_files, patch)
     fetch_base_commit(pull_request["baseRefOid"])
     LOGGER.info("Reviewing PR #%s with %s", number, model)
     LOGGER.info("Diff covers %d changed files", len(diff_files))
@@ -788,7 +1157,23 @@ def review_pull_request(
         session_id = create_session(server.base_url, server.password, model, directory)
         LOGGER.info("Created session %s", session_id)
         run_review_command(server.base_url, server.password, session_id, command, arguments)
-        answer = wait_for_review(server.base_url, server.password, session_id, timeout)
+        session_agent = _session_info(server.base_url, server.password, session_id).get("agent")
+        LOGGER.info("Review session agent %s", session_agent or "unset")
+        try:
+            answer = run_with_deadline(
+                lambda: wait_for_review(server.base_url, server.password, session_id, timeout),
+                timeout + DRIVER_GRACE_SECONDS,
+            )
+        except DriverTimeoutError as error:
+            for line in server.recent_output():
+                LOGGER.error("opencode: %s", line)
+            raise ReviewError(
+                f"{error}; " + _session_diagnostics(server.base_url, server.password, session_id)
+            ) from error
+        except ReviewError:
+            for line in server.recent_output():
+                LOGGER.error("opencode: %s", line)
+            raise
     finally:
         server.close()
 
@@ -870,6 +1255,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     except ReviewError as error:
         LOGGER.error("%s", error)
+        if arguments.output is not None:
+            arguments.output.write_text(f"Review failed: {error}\n", encoding="utf-8")
         return 1
     return 0
 
