@@ -590,16 +590,27 @@ class NavBar(Horizontal):
         from textual.css.query import NoMatches
 
         focused = self.app.focused
-        if focused is not None and not any(
-            focused is button for button in self.query(Button)
-        ):
-            return
+        if focused is not None:
+            # If something outside the nav bar is focused, keep it.
+            if not any(focused is button for button in self.query(Button)):
+                return
+
         try:
             active_button = self.query(Button).filter(".active").first()
         except NoMatches:
             return
         if active_button is not None and active_button.can_focus:
             active_button.focus()
+
+    def on_mount(self) -> None:
+        """Apply the active class to the current tab button and fix focus."""
+        self._apply_active()
+        # Use call_after_refresh so focus is set after Textual's
+        # default focus (which goes to the first focusable widget in the
+        # tree) has been established.  This prevents focus from landing
+        # on a search input in the dashboard before the nav highlight
+        # updates.
+        self.call_after_refresh(self._focus_active)
 
 
 __all__ = [
