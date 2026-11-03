@@ -63,6 +63,27 @@
     min-height: 5;
 }
 
+/* The jobs and fit tables flex instead of growing to their full row count,
+   so the panes below them (the job details card, the fit breakdown) stay
+   on screen instead of being clipped by the content container. */
+#jobs_table, #fit_table {
+    height: 1fr;
+    min-height: 4;
+}
+
+/* The job details card is empty until "View Details" is picked, so it
+   starts hidden and takes a bounded slice of the page when shown. */
+#job_details {
+    display: none;
+    height: 12;
+    max-height: 40%;
+}
+
+#fit_detail {
+    height: 12;
+    max-height: 40%;
+}
+
 /* When the preview's min-height pushes the action buttons off the bottom on
    short terminals, let the resume page scroll instead of clipping them. */
 #resume_content {

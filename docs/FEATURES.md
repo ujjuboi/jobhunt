@@ -84,6 +84,8 @@ jobhunt/
 
 - Profile auto-save: selecting a DOCX in the Resume screen syncs the profile to the DB for fit scoring
 - Job selection: clicking a row in the Jobs screen sets `app.selected_job_id` for the Resume screen
+- Row context menu: clicking a job row opens a floating menu with **View Details** (scrollable job card), **Chat About This Job** (job details pre-loaded as chat context), and **Apply** (opens the posting in the browser); Escape or a click elsewhere dismisses it
+- Fit breakdown on click: clicking a scored row shows the score explanation, matched/missing skills, and suggested resume bullets
 - "Save to Outputs": generates and saves tailored resume/cover letter to `outputs/` directory
 - Dashboard live counts: total jobs, total applications, recent activity list
 - Multi-source search: iterates all enabled sources from config, dedupes results, tags by source

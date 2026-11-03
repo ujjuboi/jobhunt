@@ -15,6 +15,8 @@ Every screen subclasses `BaseScreen` (`app/screens/base.py`), which provides:
 - **Navigation bar** — shared `NavBar` component (`app/components.py`) with 7 buttons (Dashboard, Search, Jobs, Fit, Resume, Chat, Settings); the active tab is highlighted via the `active` CSS class, driven by the global `app.active_tab` state
 - **Content area** — `#screen_content` container
 - **Action rows** — every screen's action buttons are grouped in a shared `ButtonRow` component (`app/components.py`, a `Horizontal` with `height: auto`) so all in-screen actions on a page align on a single row. On Chat/Search the row also holds the message/query input next to its button.
+- **Row-click tables** — `RowClickTable` (a `DataTable` subclass) posts a `RowClicked` message for every click on a data row, because Textual's `DataTable` only posts `RowSelected` in row-cursor mode
+- **Context menus** — `ContextMenu` (a `Vertical` overlay) shows a floating menu of actions anchored at a screen position; it is dismissed with Escape or a click outside of it
 - **Footer**
 - **Status text** — one-line status message via `self._status(text, id=...)` and `set_message()`
 - **Background work** — never block the event loop; use `self._run_worker(coro, group)` from `WorkerMixin` and update the UI with `self.call_after_refresh(...)`
@@ -66,13 +68,19 @@ types — results are filtered instantly without a server call.
 
 ### Jobs (`jobs`)
 
-Paginated DataTable of saved jobs (20 per page) with a text filter, row
-selection, and refresh capability.
+Paginated DataTable of saved jobs (20 per page) with a text filter, a
+row-click context menu, and refresh capability.
 
 | Widget ID | Type | Purpose |
 |---|---|---|
 | `#jobs_filter_input` | Input | Live text filter (title, company, location) |
-| `#jobs_table` | DataTable | Saved jobs for the current page |
+| `#jobs_table` | RowClickTable | Saved jobs for the current page (reports row clicks) |
+| `#job_details` | ScrollableTextWindow | Full job card, shown below the table on demand |
+| `#job_context_menu` | ContextMenu | Floating menu with the row actions |
+| `#job_menu_title` | Static | Heading of the context menu (the job's title) |
+| `#view_details_btn` | ActionButton | Show the job card in `#job_details` |
+| `#chat_job_btn` | ActionButton | Hand the job to the Chat screen and switch to it |
+| `#apply_btn` | ActionButton | Open the job's application URL in the browser |
 | `#jobs_status` | StatusText | Status messages ("Showing X of Y jobs (page N of M)") |
 | `#prev_page_btn` | Button | Previous page (disabled on first page) |
 | `#next_page_btn` | Button | Next page (disabled on last page) |
@@ -85,9 +93,22 @@ filter input resets to page 1 and re-queries with a case-insensitive, literal
 substring match against title, company, and location (Unicode-aware case
 folding; `%` and `_` are not treated as `LIKE` wildcards).
 
-**Job selection:** clicking a row sets `self.app.selected_job_id` and updates the status bar
-with "Selected: <title>". This selection is consumed by the Resume screen for tailored
-resume/cover-letter generation.
+**Row actions:** clicking a row selects the job (`self.app.selected_job_id`, which
+the Resume screen consumes for tailored resume/cover-letter generation) and opens a
+floating `ContextMenu` anchored at the click position. The menu offers three actions:
+*View Details* (renders the job card — title, company, id, posting date, location,
+salary, remote flag, source, URL, and the full description — into the scrollable
+`#job_details` pane below the table), *Chat About This Job* (loads the job into the
+Chat screen as context and switches to it), and *Apply* (opens the job's URL in the
+default browser). Escape or a click outside the menu dismisses it; the menu is moved
+up/left when it would overflow the screen.
+
+**Click handling:** `#jobs_table` is a `RowClickTable` (a `DataTable` subclass), because
+Textual's `DataTable` defaults to `cursor_type="cell"`: a single click only moves the
+cursor and never posts `RowSelected`. `RowClickTable` posts a `RowClicked` message
+(with the row key and the click's screen coordinates) for every click on a data row.
+Keyboard users get the same menu through `CellSelected` (Enter), anchored to the
+selected row.
 
 **Auto-reload:** jobs are reloaded on mount, on resume of focus, and on refresh button press.
 
@@ -103,8 +124,8 @@ Scores jobs against the user's profile using the scoring pipeline.
 | `#fit_filter_input` | Input | Live text filter (title, company, location); disabled while scoring |
 | `#fit_status` | StatusText | Status messages |
 | `#fit_loading` | LoadingIndicator | Shown while a ranking run is in progress |
-| `#fit_table` | DataTable | Current page's jobs, scored rows first (score descending) |
-| `#fit_detail` | Static | Per-job breakdown |
+| `#fit_table` | RowClickTable | Current page's jobs, scored rows first (score descending) |
+| `#fit_detail` | ScrollableTextWindow | Per-job breakdown |
 | `#prev_page_btn` | Button | Previous page (disabled on first page) |
 | `#next_page_btn` | Button | Next page (disabled on last page) |
 | `#fit_page_indicator` | StatusText | "Page N of M" indicator |
@@ -123,8 +144,10 @@ auto-ranks that page's unscored jobs — the `#fit_loading` indicator and a "Ran
 N" status are shown while scoring runs, and pagination plus the filter input are
 disabled until it finishes (so the text in the box cannot diverge from the filter
 being scored). Scores are cached per job id, so revisiting a page never re-ranks
-known scores. Selecting a row shows the detailed breakdown: score, explanation,
-matched skills, missing skills, and suggested resume bullets.
+known scores. Clicking a row (or selecting it with the keyboard) shows the detailed
+breakdown in the scrollable `#fit_detail` pane: score, explanation, matched skills,
+missing skills, and suggested resume bullets; the clicked job also becomes the
+current selection (`self.app.selected_job_id`).
 
 **Profile requirement:** needs a `Profile` saved in the DB (auto-synced when selecting a
 DOCX on the Resume screen). Without a profile, displays "No profile found".
@@ -183,6 +206,13 @@ the model's context on subsequent turns).
 
 **Busy guard:** prevents double-sends. A new message is not sent while the agent is still
 responding.
+
+**Job context:** the Jobs screen can hand a job over with "Chat About This Job". The job
+is appended to the conversation as a `system` message (title, company, location, posting
+date, id, URL, and a description truncated to 4,000 characters), echoed in the transcript
+as a "Job context" line, and the input is pre-filled with the starter question
+"What should I know about this job?". The context is applied even when the Chat screen
+has not been opened yet: it is held until the screen is mounted.
 
 ---
 
